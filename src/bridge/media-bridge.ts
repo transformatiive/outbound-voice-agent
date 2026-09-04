@@ -21,12 +21,18 @@ import {
 
 export type JsonObject = Record<string, unknown>;
 
+/** Extra Telnyx playout after Grok `response.done` (Think Fast 2.0 can call end_call mid-sentence). */
+export const DEFAULT_HANGUP_PLAYOUT_BUFFER_MS = 1000;
+export const DEFAULT_HANGUP_MAX_WAIT_MS = 15_000;
+const PCMU_BYTES_PER_MS = 8;
+
 export type MediaBridgeOptions = {
   call: CallRecord;
   sendGrok: (event: JsonObject) => void;
   sendTelnyx: (event: JsonObject) => void;
   telnyx: TelnyxClient;
   hangupDelayMs?: number;
+  hangupMaxWaitMs?: number;
   voice?: string;
   model?: string;
   extraInstructions?: string;
@@ -45,6 +51,7 @@ export class MediaBridge {
   private readonly sendTelnyx: (event: JsonObject) => void;
   private readonly telnyx: TelnyxClient;
   private readonly hangupDelayMs: number;
+  private readonly hangupMaxWaitMs: number;
   private readonly voice: string;
   private readonly extraInstructions: string | undefined;
   private readonly turnDetection: TurnDetectionSettings;
@@ -62,13 +69,20 @@ export class MediaBridge {
   private grokResponsePending = false;
   private readonly pendingUser = new Map<string, string>();
   private grokConfigured = false;
+  private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
+    playMs: 0,
+    firstDeltaAtMs: undefined,
+    done: true,
+  };
+  private readonly responseDoneWaiters: Array<() => void> = [];
 
   constructor(opts: MediaBridgeOptions) {
     this.call = opts.call;
     this.sendGrok = opts.sendGrok;
     this.sendTelnyx = opts.sendTelnyx;
     this.telnyx = opts.telnyx;
-    this.hangupDelayMs = opts.hangupDelayMs ?? 1200;
+    this.hangupDelayMs = opts.hangupDelayMs ?? DEFAULT_HANGUP_PLAYOUT_BUFFER_MS;
+    this.hangupMaxWaitMs = opts.hangupMaxWaitMs ?? DEFAULT_HANGUP_MAX_WAIT_MS;
     this.voice = opts.voice ?? opts.call.voice;
     this.extraInstructions = opts.extraInstructions ?? opts.call.extraInstructions;
     this.turnDetection = opts.turnDetection ?? DEFAULT_TURN_DETECTION;
@@ -181,6 +195,7 @@ export class MediaBridge {
         return;
       }
       case "input_audio_buffer.speech_started": {
+        if (this.hangingUp) return;
         const waiting = this.isWaitingForCalleeSpeech();
         const decision = onSpeechStarted(this.calleeGate, waiting, this.clockMs(), this.calleeSpeechConfig);
         if (waiting) {
@@ -260,7 +275,9 @@ export class MediaBridge {
     if (this.hangingUp) return;
     this.hangingUp = true;
     this.call.endedReason = this.call.endedReason ?? reason;
-    if (this.hangupDelayMs > 0) {
+    if (reason === "end_call") {
+      await this.waitForGoodbyePlayout();
+    } else if (this.hangupDelayMs > 0) {
       await delay(this.hangupDelayMs);
     }
     try {
@@ -298,6 +315,7 @@ export class MediaBridge {
       if (this.grokResponsePending) return;
       this.grokResponsePending = true;
       this.suppressAssistantAudio = false;
+      this.beginTurnAudio();
       return;
     }
     if (this.suppressUntilNextCalleeSpeech) {
@@ -306,10 +324,13 @@ export class MediaBridge {
     }
     this.grokResponsePending = true;
     this.suppressAssistantAudio = false;
+    this.beginTurnAudio();
   }
 
   private onGrokResponseDone(): void {
     this.grokResponsePending = false;
+    this.turnAudio.done = true;
+    this.flushResponseDoneWaiters();
     if (!this.greetingPlaying) return;
     this.greetingPlaying = false;
     this.configureGrokSession();
@@ -339,8 +360,66 @@ export class MediaBridge {
     const delta =
       typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
     if (typeof delta === "string" && delta.length > 0) {
+      this.noteTurnAudio(delta);
       this.sendTelnyx({ event: "media", media: { payload: delta } });
     }
+  }
+
+  private beginTurnAudio(): void {
+    this.turnAudio = { playMs: 0, firstDeltaAtMs: undefined, done: false };
+  }
+
+  private noteTurnAudio(base64: string): void {
+    this.turnAudio.playMs += pcmuPlayoutMsFromBase64(base64);
+    this.turnAudio.firstDeltaAtMs ??= this.clockMs();
+    this.turnAudio.done = false;
+  }
+
+  private estimateRemainingPlayoutMs(): number {
+    const elapsed =
+      this.turnAudio.firstDeltaAtMs !== undefined
+        ? Math.max(0, this.clockMs() - this.turnAudio.firstDeltaAtMs)
+        : 0;
+    return Math.max(0, this.turnAudio.playMs - elapsed);
+  }
+
+  private async waitForGoodbyePlayout(): Promise<void> {
+    const deadline = this.clockMs() + this.hangupMaxWaitMs;
+    if (this.grokResponsePending || !this.turnAudio.done) {
+      await this.waitForResponseDone(Math.max(0, deadline - this.clockMs()));
+    }
+    const waitMs = Math.min(
+      Math.max(0, deadline - this.clockMs()),
+      this.estimateRemainingPlayoutMs() + this.hangupDelayMs,
+    );
+    if (waitMs > 0) await delay(waitMs);
+  }
+
+  private waitForResponseDone(timeoutMs: number): Promise<void> {
+    if (!this.grokResponsePending && this.turnAudio.done) return Promise.resolve();
+    if (timeoutMs <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      let finish: () => void = () => undefined;
+      const timer = setTimeout(() => {
+        this.removeResponseDoneWaiter(finish);
+        resolve();
+      }, timeoutMs);
+      finish = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.responseDoneWaiters.push(finish);
+    });
+  }
+
+  private flushResponseDoneWaiters(): void {
+    const waiters = this.responseDoneWaiters.splice(0);
+    for (const waiter of waiters) waiter();
+  }
+
+  private removeResponseDoneWaiter(waiter: () => void): void {
+    const idx = this.responseDoneWaiters.indexOf(waiter);
+    if (idx >= 0) this.responseDoneWaiters.splice(idx, 1);
   }
 
   private logCalleeGate(decision: CalleeSpeechDecision, event: string): void {
@@ -375,6 +454,12 @@ function vadAudioDurationMs(event: JsonObject): number | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+export function pcmuPlayoutMsFromBase64(base64: string): number {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+  return Math.floor(bytes / PCMU_BYTES_PER_MS);
 }
 
 function delay(ms: number): Promise<void> {

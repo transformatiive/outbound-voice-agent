@@ -23,7 +23,8 @@ describe("config", () => {
       idleTimeoutMs: 12_000,
     });
     expect(cfg.calleeSpeechGraceMs).toBe(1000);
-    expect(cfg.calleeMinSpeechMs).toBe(250);
+    expect(cfg.calleeMinSpeechMs).toBe(130);
+    expect(cfg.hangupPlayoutBufferMs).toBe(1000);
   });
 
   it("honors GROK_VAD_* env overrides and clamps them", () => {
@@ -39,6 +40,7 @@ describe("config", () => {
       GROK_VOICE_SPEED: "1.05",
       GROK_CALLEE_SPEECH_GRACE_MS: "1200",
       GROK_CALLEE_MIN_SPEECH_MS: "300",
+      GROK_HANGUP_PLAYOUT_MS: "1500",
     });
     expect(cfg.turnDetection).toEqual({
       threshold: 0.7,
@@ -50,6 +52,7 @@ describe("config", () => {
     expect(cfg.grokVoice).toBe("ara");
     expect(cfg.calleeSpeechGraceMs).toBe(1200);
     expect(cfg.calleeMinSpeechMs).toBe(300);
+    expect(cfg.hangupPlayoutBufferMs).toBe(1500);
 
     const clamped = loadConfig({
       API_KEY: "k",
@@ -61,12 +64,14 @@ describe("config", () => {
       GROK_VOICE_SPEED: "9",
       GROK_CALLEE_SPEECH_GRACE_MS: "99999",
       GROK_CALLEE_MIN_SPEECH_MS: "1",
+      GROK_HANGUP_PLAYOUT_MS: "99999",
     });
     expect(clamped.turnDetection.threshold).toBe(0.9);
     expect(clamped.turnDetection.silenceDurationMs).toBe(100);
     expect(clamped.grokVoiceSpeed).toBe(1.5);
     expect(clamped.calleeSpeechGraceMs).toBe(5000);
     expect(clamped.calleeMinSpeechMs).toBe(50);
+    expect(clamped.hangupPlayoutBufferMs).toBe(8000);
   });
 
   it("treats outbound as unready when Telnyx API key is missing", () => {

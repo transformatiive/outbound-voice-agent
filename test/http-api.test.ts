@@ -22,6 +22,7 @@ const config: AppConfig = {
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
+  hangupPlayoutBufferMs: 0,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: "https://n8n.example/webhook/result",
   maxCallSeconds: 600,
@@ -294,6 +295,30 @@ describe("HTTP API", () => {
       .set("Authorization", "Bearer test-api-key");
     expect(gotWait.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Confirmar a marcação\.$/);
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
+  });
+
+  it("never speaks a ROLEPLAY objective in the composed greeting", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345684",
+        language: "pt-PT",
+        greeting: "Fala a secretária da clínica.",
+        objective: `ROLEPLAY: quem atende diz Estou.
+# Objetivo
+Confirmar a consulta de otorrino na segunda às 10h.`,
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    const got = await request(app)
+      .get(`/api/calls/${res.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
+    expect(got.body.greeting).not.toMatch(/ROLEPLAY/i);
+    expect(got.body.greeting).not.toMatch(/quem atende/i);
+    expect(got.body.objective).toMatch(/ROLEPLAY/);
   });
 
   it("GET /api/calls/:id requires auth and 404s unknown ids", async () => {

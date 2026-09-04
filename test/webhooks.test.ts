@@ -23,6 +23,7 @@ const config: AppConfig = {
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
+  hangupPlayoutBufferMs: 0,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,

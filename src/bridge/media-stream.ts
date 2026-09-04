@@ -66,6 +66,7 @@ async function handleMediaConnection(
     outputSpeed: deps.config.grokVoiceSpeed,
     calleeSpeechGraceMs: deps.config.calleeSpeechGraceMs,
     calleeMinSpeechMs: deps.config.calleeMinSpeechMs,
+    hangupDelayMs: deps.config.hangupPlayoutBufferMs,
     onEnded: deps.onCallEnded,
   });
 

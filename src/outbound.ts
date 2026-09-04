@@ -18,6 +18,7 @@ export type OutboundBody = {
   maxDurationSeconds?: unknown;
   waitForCallee?: unknown;
   timezone?: unknown;
+  spokenAsk?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
@@ -60,8 +61,12 @@ export function parseOutboundBody(
   }
   const greetingRaw = typeof body.greeting === "string" ? body.greeting.trim() : "";
   const objective = typeof body.objective === "string" ? body.objective.trim() : "";
+  const spokenAskRaw = typeof body.spokenAsk === "string" ? body.spokenAsk.trim() : "";
   if (greetingRaw.length > 2000) {
     return { ok: false, error: { status: 400, error: "invalid_greeting" } };
+  }
+  if (spokenAskRaw.length > 500) {
+    return { ok: false, error: { status: 400, error: "invalid_spokenAsk" } };
   }
   if (!objective || objective.length > 4000) {
     return { ok: false, error: { status: 400, error: "invalid_objective" } };
@@ -90,6 +95,7 @@ export function parseOutboundBody(
     language,
     ...(greetingRaw ? { greeting: greetingRaw } : {}),
     objective,
+    ...(spokenAskRaw ? { spokenAsk: spokenAskRaw } : {}),
     timezone,
     now: opts.now ?? new Date(),
   });

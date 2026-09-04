@@ -135,7 +135,7 @@ export function sessionUpdatePayload(input: {
           type: "function",
           name: "end_call",
           description:
-            "Hang up after you have said goodbye. Use when the objective is complete, declined, or impossible.",
+            "Hang up only after you have fully spoken the goodbye or summary. Never cut a sentence short. Use when the objective is complete, declined, or impossible.",
           parameters: {
             type: "object",
             additionalProperties: false,

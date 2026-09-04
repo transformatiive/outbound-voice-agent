@@ -241,4 +241,33 @@ describe("prompt / language", () => {
       assertNoSpokenBranding(text);
     }
   });
+
+  it("asks for a human phone voice: warmth, certo/perfeito, no numbered lists, no ROLEPLAY dump", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Fala a secretária.",
+      objective: "ROLEPLAY: quem atende. Confirmar a consulta.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/certo/);
+    expect(pt).toMatch(/perfeito/);
+    expect(pt).toMatch(/assistente de chat/);
+    expect(pt).toMatch(/NUNCA leias listas numeradas/);
+    expect(pt).toMatch(/Palavra falada/);
+    expect(pt).toMatch(/NUNCA leias[\s\S]*ROLEPLAY/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good morning.",
+      objective: "Confirm Thursday",
+    });
+    expect(en).toMatch(/chat assistant/);
+    expect(en).toMatch(/numbered lists/);
+    expect(en).toMatch(/natural confirmations/);
+    expect(en).toMatch(/perfect/);
+    expect(en).toMatch(/full goodbye/);
+    expect(en).toMatch(/Spoken word only/);
+    assertNoSpokenBranding(en);
+  });
 });
