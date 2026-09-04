@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
-import { isLanguage, type Language } from "./prompt.js";
+import { defaultGreeting, isLanguage, type Language } from "./prompt.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -41,11 +41,15 @@ export function parseOutboundBody(body: OutboundBody):
   const language: unknown =
     languageRaw === undefined || languageRaw === null || languageRaw === "" ? "pt-PT" : languageRaw;
   if (!isLanguage(language)) {
-    return { ok: false, error: { status: 400, error: "invalid_language", details: "language must be pt-PT" } };
+    return {
+      ok: false,
+      error: { status: 400, error: "invalid_language", details: "language must be pt-PT | en-GB | en-US" },
+    };
   }
-  const greeting = typeof body.greeting === "string" ? body.greeting.trim() : "";
+  const greetingRaw = typeof body.greeting === "string" ? body.greeting.trim() : "";
+  const greeting = greetingRaw || defaultGreeting(language);
   const objective = typeof body.objective === "string" ? body.objective.trim() : "";
-  if (!greeting || greeting.length > 2000) {
+  if (greeting.length > 2000) {
     return { ok: false, error: { status: 400, error: "invalid_greeting" } };
   }
   if (!objective || objective.length > 4000) {

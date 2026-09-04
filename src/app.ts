@@ -13,6 +13,7 @@ import {
   type TelnyxWebhookEnvelope,
 } from "./telnyx/webhooks.js";
 import { placeOutboundCall } from "./outbound.js";
+import { LANGUAGES } from "./prompt.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
@@ -58,6 +59,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       service: "outbound-voice-agent",
       voice: deps.config.grokVoice,
       language: "pt-PT",
+      languages: LANGUAGES,
       model: deps.config.grokModel,
       from: deps.config.fromNumber,
       telnyx: {

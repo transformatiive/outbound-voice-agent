@@ -2,7 +2,7 @@
 
 Outbound-only **Grok Voice Live 2** agent over **Telnyx Call Control** (Alfaseguros).
 
-Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. **Portuguese of Portugal (pt-PT) only.** Not Alice.
+Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. Languages: **`pt-PT` | `en-GB` | `en-US`** (default `pt-PT`). Not Alice.
 
 Tests never place real phone calls.
 
@@ -22,7 +22,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 1. `POST /api/outbound` → Telnyx `POST /v2/calls` with bidirectional media streaming.
 2. Telnyx connects to `wss://…/media-stream`.
 3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2, voice `ara`).
-4. Greeting is spoken verbatim (`force_message`), then the model works the objective in pt-PT.
+4. Greeting is spoken verbatim (`force_message`), then the model works the objective in the requested language (`pt-PT`, `en-GB`, or `en-US`).
 5. The model calls `end_call` → Telnyx hangup.
 6. Optional `RESULT_WEBHOOK` receives the transcript and outcome.
 
@@ -38,7 +38,11 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 ### `POST /api/outbound`
 
-`language` is optional and must be `pt-PT` when sent (default `pt-PT`).
+`language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `greeting` is optional; if omitted, a language-specific default is spoken.
+
+- `pt-PT` — European Portuguese (never Brazilian). Default greeting: `Olá, fala a Ara. Esta chamada é gravada.`
+- `en-GB` — natural British English. Default greeting: `Hello, this is Ara. This call is being recorded.`
+- `en-US` — natural American English. Default greeting: `Hi, this is Ara. This call is being recorded.`
 
 ```json
 {
