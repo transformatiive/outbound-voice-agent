@@ -7,6 +7,25 @@ export type GrokFunctionTool = {
   parameters: Record<string, unknown>;
 };
 
+export type TurnDetectionSettings = {
+  threshold: number;
+  silenceDurationMs: number;
+  prefixPaddingMs: number;
+  idleTimeoutMs: number;
+};
+
+/**
+ * Phone-tuned server_vad. silence_duration_ms 350 (was 700) so the agent
+ * starts speaking ~0.3s after the callee stops, not ~1–2s later.
+ * prefix_padding_ms 200 keeps barge-in audio; idle_timeout_ms is hang-idle, not turn gap.
+ */
+export const DEFAULT_TURN_DETECTION: TurnDetectionSettings = {
+  threshold: 0.5,
+  silenceDurationMs: 350,
+  prefixPaddingMs: 200,
+  idleTimeoutMs: 12_000,
+};
+
 export type GrokSessionUpdate = {
   type: "session.update";
   session: {
@@ -37,11 +56,27 @@ export function grokRealtimeUrl(xaiBaseUrl: string, model: string): string {
   const wss = https.startsWith("https://")
     ? `wss://${https.slice("https://".length)}`
     : https.startsWith("http://")
-      ? `ws://${https.slice("http://".length)}`
-      : https.startsWith("wss://") || https.startsWith("ws://")
-        ? https
-        : `wss://${https}`;
+    ? `ws://${https.slice("http://".length)}`
+    : https.startsWith("wss://") || https.startsWith("ws://")
+      ? https
+      : `wss://${https}`;
   return `${wss}/v1/realtime?model=${encodeURIComponent(model)}`;
+}
+
+export function grokTurnDetection(settings: TurnDetectionSettings = DEFAULT_TURN_DETECTION): {
+  type: "server_vad";
+  threshold: number;
+  silence_duration_ms: number;
+  prefix_padding_ms: number;
+  idle_timeout_ms: number;
+} {
+  return {
+    type: "server_vad",
+    threshold: settings.threshold,
+    silence_duration_ms: settings.silenceDurationMs,
+    prefix_padding_ms: settings.prefixPaddingMs,
+    idle_timeout_ms: settings.idleTimeoutMs,
+  };
 }
 
 export function sessionUpdatePayload(input: {
@@ -51,19 +86,14 @@ export function sessionUpdatePayload(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  turnDetection?: TurnDetectionSettings;
 }): GrokSessionUpdate {
   return {
     type: "session.update",
     session: {
       voice: input.voice,
       instructions: buildSessionInstructions(input),
-      turn_detection: {
-        type: "server_vad",
-        threshold: 0.85,
-        silence_duration_ms: 700,
-        prefix_padding_ms: 300,
-        idle_timeout_ms: 12_000,
-      },
+      turn_detection: grokTurnDetection(input.turnDetection ?? DEFAULT_TURN_DETECTION),
       reasoning: { effort: "none" },
       audio: {
         input: {

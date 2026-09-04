@@ -1,5 +1,9 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
-import { sessionUpdatePayload } from "../grok/session.js";
+import {
+  DEFAULT_TURN_DETECTION,
+  sessionUpdatePayload,
+  type TurnDetectionSettings,
+} from "../grok/session.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 
 export type JsonObject = Record<string, unknown>;
@@ -13,6 +17,7 @@ export type MediaBridgeOptions = {
   voice?: string;
   model?: string;
   extraInstructions?: string;
+  turnDetection?: TurnDetectionSettings;
   onEnded?: (call: CallRecord) => void;
   now?: () => string;
 };
@@ -25,6 +30,7 @@ export class MediaBridge {
   private readonly hangupDelayMs: number;
   private readonly voice: string;
   private readonly extraInstructions: string | undefined;
+  private readonly turnDetection: TurnDetectionSettings;
   private readonly onEnded: ((call: CallRecord) => void) | undefined;
   private readonly now: () => string;
   private greetingSent = false;
@@ -40,6 +46,7 @@ export class MediaBridge {
     this.hangupDelayMs = opts.hangupDelayMs ?? 1200;
     this.voice = opts.voice ?? opts.call.voice;
     this.extraInstructions = opts.extraInstructions ?? opts.call.extraInstructions;
+    this.turnDetection = opts.turnDetection ?? DEFAULT_TURN_DETECTION;
     this.onEnded = opts.onEnded;
     this.now = opts.now ?? (() => new Date().toISOString());
   }
@@ -55,6 +62,7 @@ export class MediaBridge {
           ? { extraInstructions: this.extraInstructions }
           : {}),
         ...(this.call.waitForCallee === true ? { waitForCallee: true } : {}),
+        turnDetection: this.turnDetection,
       }) as unknown as JsonObject,
     );
     this.grokConfigured = true;
@@ -86,6 +94,7 @@ export class MediaBridge {
         }
         return;
       case "media": {
+        // Forward Telnyx PCMU to Grok immediately — no debounce or extra buffer.
         const media = message.media as JsonObject | undefined;
         const payload = media?.payload;
         if (typeof payload === "string" && payload.length > 0) {

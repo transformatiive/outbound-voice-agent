@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import { DEFAULT_TURN_DETECTION } from "../src/grok/session.js";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
 import type { TelnyxClient } from "../src/telnyx/client.js";
@@ -18,6 +19,7 @@ const config: AppConfig = {
   xaiBaseUrl: "https://api.x.ai",
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
+  turnDetection: DEFAULT_TURN_DETECTION,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,
@@ -48,7 +50,7 @@ describe("Telnyx webhooks", () => {
       .send({
         to: "+351910000001",
         language: "pt-PT",
-        greeting: "Olá, fala a Ara.",
+        greeting: "Olá, fala a secretária.",
         objective: "Confirmar uma marcação",
       });
     const id = created.body.id as string;

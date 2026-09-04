@@ -61,3 +61,63 @@ describe("parseOutboundBody waitForCallee", () => {
     expect(parsed.error).toMatchObject({ status: 400, error: "invalid_waitForCallee" });
   });
 });
+
+describe("parseOutboundBody greeting", () => {
+  it("uses a neutral Olá./Hello. when greeting is omitted", () => {
+    const pt = parseOutboundBody({
+      to: "+351912345678",
+      language: "pt-PT",
+      objective: "Confirmar a marcação",
+    });
+    expect(pt.ok).toBe(true);
+    if (!pt.ok) return;
+    expect(pt.value.greeting).toBe("Olá.");
+
+    const gb = parseOutboundBody({
+      to: "+351912345678",
+      language: "en-GB",
+      objective: "Confirm the booking",
+    });
+    expect(gb.ok).toBe(true);
+    if (!gb.ok) return;
+    expect(gb.value.greeting).toBe("Hello.");
+
+    const us = parseOutboundBody({
+      to: "+351912345678",
+      language: "en-US",
+      objective: "Confirm the booking",
+    });
+    expect(us.ok).toBe(true);
+    if (!us.ok) return;
+    expect(us.value.greeting).toBe("Hello.");
+  });
+
+  it("keeps a caller-supplied persona greeting", () => {
+    const parsed = parseOutboundBody(base);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.greeting).toBe("Olá, fala a secretária.");
+  });
+
+  it("requires greeting when waitForCallee is true or inferred", () => {
+    const explicit = parseOutboundBody({
+      to: "+351912345678",
+      language: "pt-PT",
+      objective: "Confirmar a marcação",
+      waitForCallee: true,
+    });
+    expect(explicit.ok).toBe(false);
+    if (explicit.ok) return;
+    expect(explicit.error).toMatchObject({ status: 400, error: "invalid_greeting" });
+
+    const inferred = parseOutboundBody({
+      to: "+351912345678",
+      language: "pt-PT",
+      objective: "Confirmar a marcação",
+      instructions: "Wait silently until the callee speaks, then greet.",
+    });
+    expect(inferred.ok).toBe(false);
+    if (inferred.ok) return;
+    expect(inferred.error).toMatchObject({ status: 400, error: "invalid_greeting" });
+  });
+});

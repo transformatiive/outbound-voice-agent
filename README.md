@@ -4,7 +4,9 @@ Outbound-only **Grok Voice Live 2** agent over **Telnyx Call Control** (Alfasegu
 
 Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. Languages: **`pt-PT` | `en-GB` | `en-US`** (default `pt-PT`). Not Alice.
 
-Set `waitForCallee: true` on `POST /api/outbound` to stay silent until the callee speaks (e.g. «Estou»), then deliver the greeting, then pursue the objective. Default remains immediate greeting.
+Persona and objective always come from `POST /api/outbound` (`greeting`, `objective`, optional `instructions`). The agent speaks as a person on the phone — never a product name, never a recording notice.
+
+Set `waitForCallee: true` on `POST /api/outbound` to stay silent until the callee speaks (e.g. «Estou»), then deliver the **request** greeting, then pursue the objective. `greeting` is required when `waitForCallee` is true. Default remains immediate greeting.
 
 Tests never place real phone calls.
 
@@ -40,19 +42,21 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 ### `POST /api/outbound`
 
-`language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `greeting` is optional; if omitted, a language-specific default is spoken.
+`language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected.
 
-`waitForCallee` is optional (default `false`). When `true`, the agent does not speak on `session.updated`; it waits for first callee speech (`input_audio_buffer.speech_started` or a non-empty user transcription), then speaks the greeting once. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request.
+`greeting` is the spoken persona line. Pass it on every dial that should introduce a secretary or other identity. If omitted (and `waitForCallee` is not true), only a neutral fallback is spoken — `Olá.` (`pt-PT`) or `Hello.` (`en-GB` / `en-US`) — no product name and no recording line. When `waitForCallee` is true (or inferred from wait-until-callee instructions), `greeting` is required (400 `invalid_greeting`).
 
-- `pt-PT` — European Portuguese (never Brazilian). Default greeting: `Olá, fala a Ara. Esta chamada é gravada.`
-- `en-GB` — natural British English. Default greeting: `Hello, this is Ara. This call is being recorded.`
-- `en-US` — natural American English. Default greeting: `Hi, this is Ara. This call is being recorded.`
+`waitForCallee` is optional (default `false`). When `true`, the agent does not speak on `session.updated`; it waits for first callee speech (`input_audio_buffer.speech_started` or a non-empty user transcription), then speaks the greeting once. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request and always pass the persona greeting.
+
+- `pt-PT` — European Portuguese (never Brazilian). Neutral fallback if `greeting` is omitted: `Olá.`
+- `en-GB` — natural British English. Neutral fallback: `Hello.`
+- `en-US` — natural American English. Neutral fallback: `Hello.`
 
 ```json
 {
   "to": "+351912345678",
   "language": "pt-PT",
-  "greeting": "Olá, fala a Ara da Alfaseguros. Esta chamada é gravada.",
+  "greeting": "Olá, fala a secretária da Alfaseguros.",
   "objective": "Confirmar a marcação de quinta-feira às 16h.",
   "instructions": "optional extra prompt rules",
   "waitForCallee": true,
@@ -95,4 +99,4 @@ In-memory call state is per replica. Run a single instance.
 
 ## Audio
 
-Telnyx bidirectional PCMU 8 kHz ↔ Grok Voice `audio/pcmu`. Caller barge-in sends Telnyx `clear`.
+Telnyx bidirectional PCMU 8 kHz ↔ Grok Voice `audio/pcmu`. Caller barge-in sends Telnyx `clear`. Grok `server_vad` uses a short end-of-turn silence (`GROK_VAD_SILENCE_MS`, default 350ms) so replies start as soon as the callee finishes.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import request from "supertest";
+import { DEFAULT_TURN_DETECTION } from "../src/grok/session.js";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
 import type { TelnyxClient } from "../src/telnyx/client.js";
@@ -17,6 +18,7 @@ const config: AppConfig = {
   xaiBaseUrl: "https://api.x.ai",
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
+  turnDetection: DEFAULT_TURN_DETECTION,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: "https://n8n.example/webhook/result",
   maxCallSeconds: 600,
@@ -95,7 +97,7 @@ describe("HTTP API", () => {
       .send({
         to: "+351912345678",
         language: "en-GB",
-        greeting: "Hello, this is Ara.",
+        greeting: "Hello, this is the secretary.",
         objective: "Confirm Thursday at 4pm",
       });
     expect(englishGb.status).toBe(201);
@@ -116,7 +118,8 @@ describe("HTTP API", () => {
     const gotUs = await request(app)
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotUs.body.greeting).toBe("Hi, this is Ara. This call is being recorded.");
+    expect(gotUs.body.greeting).toBe("Hello.");
+    expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
     const badTo = await request(app)
       .post("/api/outbound")
@@ -139,7 +142,7 @@ describe("HTTP API", () => {
       .send({
         to: "+351912345678",
         language: "pt-PT",
-        greeting: "Olá, fala a Ara.",
+        greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação de quinta às 16h",
       });
 
@@ -173,7 +176,7 @@ describe("HTTP API", () => {
       .set("Authorization", "Bearer test-api-key")
       .send({
         to: "+351912345679",
-        greeting: "Olá, fala a Ara.",
+        greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
       });
     expect(omittedLang.status).toBe(201);
@@ -184,7 +187,7 @@ describe("HTTP API", () => {
       .set("Authorization", "Bearer test-api-key");
     expect(got.status).toBe(200);
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
-    expect(got.body.greeting).toBe("Olá, fala a Ara.");
+    expect(got.body.greeting).toBe("Olá, fala a secretária.");
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
     expect(got.body.waitForCallee).toBe(false);
     expect(res.body.waitForCallee).toBe(false);
@@ -198,7 +201,7 @@ describe("HTTP API", () => {
       .send({
         to: "+351912345678",
         language: "pt-PT",
-        greeting: "Olá, fala a secretária da Ara.",
+        greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
         waitForCallee: true,
       });
@@ -219,7 +222,7 @@ describe("HTTP API", () => {
       .send({
         to: "+351912345679",
         language: "pt-PT",
-        greeting: "Olá, fala a secretária da Ara.",
+        greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
         instructions: "Wait silently until the callee speaks, then introduce yourself.",
       });
@@ -251,6 +254,37 @@ describe("HTTP API", () => {
     expect(bad.status).toBe(400);
     expect(bad.body.error).toBe("invalid_waitForCallee");
     expect(telnyx.dial).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses a neutral Olá./Hello. when greeting is omitted, and requires greeting with waitForCallee", async () => {
+    const { app } = createApp({ config, telnyx });
+    const omittedPt = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345682",
+        language: "pt-PT",
+        objective: "Confirmar a marcação",
+      });
+    expect(omittedPt.status).toBe(201);
+    const gotPt = await request(app)
+      .get(`/api/calls/${omittedPt.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(gotPt.body.greeting).toBe("Olá.");
+    expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
+
+    const waitMissing = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345683",
+        language: "pt-PT",
+        objective: "Confirmar a marcação",
+        waitForCallee: true,
+      });
+    expect(waitMissing.status).toBe(400);
+    expect(waitMissing.body.error).toBe("invalid_greeting");
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
   });
 
   it("GET /api/calls/:id requires auth and 404s unknown ids", async () => {
