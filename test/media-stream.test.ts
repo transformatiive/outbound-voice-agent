@@ -3,6 +3,7 @@ import { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import request from "supertest";
+import { DEFAULT_TURN_DETECTION } from "../src/grok/session.js";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
 import type { TelnyxClient } from "../src/telnyx/client.js";
@@ -21,6 +22,7 @@ const config: AppConfig = {
   xaiBaseUrl: "https://api.x.ai",
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
+  turnDetection: DEFAULT_TURN_DETECTION,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,
@@ -96,7 +98,7 @@ describe("media stream websocket", () => {
         .send({
           to: "+351912345678",
           language: "pt-PT",
-          greeting: "Olá, fala a Ara.",
+          greeting: "Olá, fala a secretária.",
           objective: "Confirmar quinta",
         });
       const call = store.get(created.body.id as string);
@@ -189,7 +191,7 @@ describe("media stream websocket", () => {
         .send({
           to: "+351912345678",
           language: "pt-PT",
-          greeting: "Olá, fala a secretária da Ara.",
+          greeting: "Olá, fala a secretária.",
           objective: "Confirmar quinta",
           waitForCallee: true,
         });
@@ -220,7 +222,7 @@ describe("media stream websocket", () => {
       expect((greeting.item as JsonObject).type).toBe("force_message");
       expect(((greeting.item as JsonObject).content as JsonObject[])[0]).toMatchObject({
         type: "output_text",
-        text: "Olá, fala a secretária da Ara.",
+        text: "Olá, fala a secretária.",
       });
 
       telnyxWs.close();

@@ -12,7 +12,7 @@ describe("Grok Voice Live 2 session", () => {
     const payload = sessionUpdatePayload({
       voice: "ara",
       language: "pt-PT",
-      greeting: "Olá, fala a Ara.",
+      greeting: "Olá, fala a secretária.",
       objective: "Confirmar marcação",
     });
     expect(payload.type).toBe("session.update");
@@ -22,6 +22,16 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(payload.session.instructions).toMatch(/português europeu/i);
+    expect(payload.session.instructions).not.toMatch(/\bAra\b/);
+    expect(payload.session.instructions).not.toMatch(/gravad/i);
+    expect(payload.session.turn_detection).toEqual({
+      type: "server_vad",
+      threshold: 0.5,
+      silence_duration_ms: 350,
+      prefix_padding_ms: 200,
+      idle_timeout_ms: 12_000,
+    });
+    expect(payload.session.reasoning).toEqual({ effort: "none" });
   });
 
   it("puts wait-for-callee flow into session instructions when waitForCallee is true", () => {
@@ -40,12 +50,30 @@ describe("Grok Voice Live 2 session", () => {
     const payload = sessionUpdatePayload({
       voice: "ara",
       language: "en-GB",
-      greeting: "Hello, this is Ara.",
+      greeting: "Hello, this is the secretary.",
       objective: "Confirm Thursday at 4pm",
     });
     expect(payload.session.voice).toBe("ara");
     expect(payload.session.audio.input.transcription.language_hint).toBe("en");
     expect(payload.session.instructions).toMatch(/British English/i);
     expect(payload.session.instructions).not.toMatch(/português europeu/i);
+  });
+
+  it("uses caller turnDetection overrides on session.update", () => {
+    const payload = sessionUpdatePayload({
+      voice: "ara",
+      language: "pt-PT",
+      greeting: "Olá.",
+      objective: "x",
+      turnDetection: {
+        threshold: 0.6,
+        silenceDurationMs: 300,
+        prefixPaddingMs: 180,
+        idleTimeoutMs: 10_000,
+      },
+    });
+    expect(payload.session.turn_detection.silence_duration_ms).toBe(300);
+    expect(payload.session.turn_detection.threshold).toBe(0.6);
+    expect(payload.session.turn_detection.prefix_padding_ms).toBe(180);
   });
 });

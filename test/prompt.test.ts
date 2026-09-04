@@ -6,7 +6,17 @@ import {
   instructionsRequestWait,
   languageHint,
   isLanguage,
+  type Language,
 } from "../src/prompt.js";
+
+function assertNoSpokenBranding(text: string): void {
+  expect(text).not.toMatch(/\bAra\b/);
+  expect(text).not.toMatch(/\bGrok\b/i);
+  expect(text).not.toMatch(/gravad/i);
+  expect(text).not.toMatch(/being recorded/i);
+  expect(text).not.toMatch(/call is recorded/i);
+  expect(text).not.toMatch(/esta chamada é gravada/i);
+}
 
 describe("prompt / language", () => {
   it("accepts pt-PT, en-GB, and en-US", () => {
@@ -31,6 +41,9 @@ describe("prompt / language", () => {
     expect(text).toMatch(/end_call/);
     expect(text).not.toMatch(/British English/i);
     expect(text).not.toMatch(/American English/i);
+    expect(text).toMatch(/pessoa ao telefone/);
+    expect(text).toMatch(/Responde logo a seguir/);
+    assertNoSpokenBranding(text);
   });
 
   it("locks en-GB to natural British English and en-US to natural American English", () => {
@@ -52,6 +65,10 @@ describe("prompt / language", () => {
     expect(us).not.toMatch(/português europeu/i);
     expect(gb).toMatch(/end_call/);
     expect(us).toMatch(/end_call/);
+    expect(gb).toMatch(/Answer as soon as the callee finishes/);
+    expect(us).toMatch(/person on the phone/);
+    assertNoSpokenBranding(gb);
+    assertNoSpokenBranding(us);
   });
 
   it("maps language_hint to xAI BCP-47 codes", () => {
@@ -60,12 +77,17 @@ describe("prompt / language", () => {
     expect(languageHint("en-US")).toBe("en");
   });
 
-  it("provides language-specific greeting defaults", () => {
-    expect(defaultGreeting("pt-PT")).toMatch(/Olá/);
-    expect(defaultGreeting("en-GB")).toMatch(/^Hello,/);
-    expect(defaultGreeting("en-US")).toMatch(/^Hi,/);
-    expect(defaultGreeting("en-GB")).toMatch(/recorded/i);
-    expect(defaultGreeting("en-US")).toMatch(/recorded/i);
+  it("provides language-specific greeting defaults with no product name or recording line", () => {
+    expect(defaultGreeting("pt-PT")).toBe("Olá.");
+    expect(defaultGreeting("en-GB")).toBe("Hello.");
+    expect(defaultGreeting("en-US")).toBe("Hello.");
+    for (const language of LANGUAGES) {
+      const greeting = defaultGreeting(language);
+      assertNoSpokenBranding(greeting);
+      expect(greeting).not.toMatch(/sou a/i);
+      expect(greeting).not.toMatch(/this is Ara/i);
+      expect(greeting).not.toMatch(/fala a Ara/i);
+    }
   });
 
   it("immediate greeting flow tells the model the greeting is already being spoken", () => {
@@ -77,12 +99,13 @@ describe("prompt / language", () => {
     expect(text).toMatch(/já está a ser dita/i);
     expect(text).toMatch(/Saudação já entregue/);
     expect(text).not.toMatch(/Espera em silêncio/);
+    assertNoSpokenBranding(text);
   });
 
   it("waitForCallee flow tells the model to stay silent until the callee speaks", () => {
     const pt = buildSessionInstructions({
       language: "pt-PT",
-      greeting: "Olá, fala a secretária da Ara.",
+      greeting: "Olá, fala a secretária.",
       objective: "Confirmar a marcação",
       waitForCallee: true,
     });
@@ -92,6 +115,7 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/Uma pergunta de cada vez/);
     expect(pt).not.toMatch(/já está a ser dita/i);
     expect(pt).not.toMatch(/Saudação já entregue/);
+    assertNoSpokenBranding(pt);
 
     const en = buildSessionInstructions({
       language: "en-GB",
@@ -105,6 +129,7 @@ describe("prompt / language", () => {
     expect(en).toMatch(/One question at a time/);
     expect(en).not.toMatch(/already being spoken/i);
     expect(en).not.toMatch(/Greeting already delivered/);
+    assertNoSpokenBranding(en);
   });
 
   it("detects wait-until-callee-speaks intent in extra instructions", () => {
@@ -116,5 +141,24 @@ describe("prompt / language", () => {
       instructionsRequestWait("Espera em silêncio até o destinatário falar, por exemplo Estou."),
     ).toBe(true);
     expect(instructionsRequestWait("Não fales até a pessoa falar.")).toBe(true);
+  });
+
+  it("session instructions never name Ara or say the call is recorded", () => {
+    const languages: Language[] = ["pt-PT", "en-GB", "en-US"];
+    for (const language of languages) {
+      const immediate = buildSessionInstructions({
+        language,
+        greeting: defaultGreeting(language),
+        objective: "x",
+      });
+      const waiting = buildSessionInstructions({
+        language,
+        greeting: defaultGreeting(language),
+        objective: "x",
+        waitForCallee: true,
+      });
+      assertNoSpokenBranding(immediate);
+      assertNoSpokenBranding(waiting);
+    }
   });
 });

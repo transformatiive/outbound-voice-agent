@@ -62,6 +62,7 @@ async function handleMediaConnection(
     sendTelnyx,
     telnyx: deps.telnyx,
     voice: deps.config.grokVoice,
+    turnDetection: deps.config.turnDetection,
     onEnded: deps.onCallEnded,
   });
 

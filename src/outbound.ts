@@ -49,9 +49,8 @@ export function parseOutboundBody(body: OutboundBody):
     };
   }
   const greetingRaw = typeof body.greeting === "string" ? body.greeting.trim() : "";
-  const greeting = greetingRaw || defaultGreeting(language);
   const objective = typeof body.objective === "string" ? body.objective.trim() : "";
-  if (greeting.length > 2000) {
+  if (greetingRaw.length > 2000) {
     return { ok: false, error: { status: 400, error: "invalid_greeting" } };
   }
   if (!objective || objective.length > 4000) {
@@ -63,6 +62,18 @@ export function parseOutboundBody(body: OutboundBody):
   }
   const waitForCallee =
     body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
+  // Persona comes from the request. waitForCallee still needs that greeting after the callee speaks.
+  if (waitForCallee && !greetingRaw) {
+    return {
+      ok: false,
+      error: {
+        status: 400,
+        error: "invalid_greeting",
+        details: "greeting is required when waitForCallee is true; pass the persona greeting",
+      },
+    };
+  }
+  const greeting = greetingRaw || defaultGreeting(language);
   const metadata =
     body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
       ? (body.metadata as Record<string, unknown>)

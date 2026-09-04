@@ -1,3 +1,5 @@
+import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "./grok/session.js";
+
 export type ReadyFlags = {
   api: boolean;
   telnyx: boolean;
@@ -18,6 +20,7 @@ export type AppConfig = {
   xaiBaseUrl: string;
   grokVoice: string;
   grokModel: string;
+  turnDetection: TurnDetectionSettings;
   publicBaseUrl: string;
   resultWebhook: string | undefined;
   maxCallSeconds: number;
@@ -27,6 +30,14 @@ export type AppConfig = {
 };
 
 type Env = Record<string, string | undefined>;
+
+function envNumber(env: Env, key: string, fallback: number, min: number, max: number): number {
+  const raw = env[key]?.trim();
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
 
 function trimSlash(url: string): string {
   return url.replace(/\/+$/, "");
@@ -51,6 +62,30 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const fromNumber = env.FROM_NUMBER?.trim() || "+351210210260";
   const grokVoice = env.GROK_VOICE?.trim() || "ara";
   const grokModel = env.GROK_MODEL?.trim() || "grok-voice-think-fast-2.0";
+  const turnDetection: TurnDetectionSettings = {
+    threshold: envNumber(env, "GROK_VAD_THRESHOLD", DEFAULT_TURN_DETECTION.threshold, 0.1, 0.9),
+    silenceDurationMs: Math.round(
+      envNumber(env, "GROK_VAD_SILENCE_MS", DEFAULT_TURN_DETECTION.silenceDurationMs, 100, 2000),
+    ),
+    prefixPaddingMs: Math.round(
+      envNumber(
+        env,
+        "GROK_VAD_PREFIX_PADDING_MS",
+        DEFAULT_TURN_DETECTION.prefixPaddingMs,
+        0,
+        1000,
+      ),
+    ),
+    idleTimeoutMs: Math.round(
+      envNumber(
+        env,
+        "GROK_VAD_IDLE_TIMEOUT_MS",
+        DEFAULT_TURN_DETECTION.idleTimeoutMs,
+        1000,
+        60_000,
+      ),
+    ),
+  };
   const resultWebhook = env.RESULT_WEBHOOK?.trim() || undefined;
   const telnyxPublicKey = env.TELNYX_PUBLIC_KEY?.trim() || undefined;
   const xaiBaseUrl = trimSlash(env.XAI_BASE_URL?.trim() || "https://api.x.ai");
@@ -82,6 +117,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     xaiBaseUrl,
     grokVoice,
     grokModel,
+    turnDetection,
     publicBaseUrl,
     resultWebhook,
     maxCallSeconds,

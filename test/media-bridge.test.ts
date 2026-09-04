@@ -10,7 +10,7 @@ function sampleCall(): CallRecord {
     to: "+351912345678",
     from: "+351210210260",
     language: "pt-PT",
-    greeting: "Olá, fala a Ara.",
+    greeting: "Olá, fala a secretária.",
     objective: "Confirmar quinta às 16h",
     voice: "ara",
     model: "grok-voice-think-fast-2.0",
@@ -169,6 +169,13 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.audio.output.format).toEqual({ type: "audio/pcmu" });
     expect(update.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(update.session.tools[0].name).toBe("end_call");
+    expect(update.session.turn_detection).toEqual({
+      type: "server_vad",
+      threshold: 0.5,
+      silence_duration_ms: 350,
+      prefix_padding_ms: 200,
+      idle_timeout_ms: 12_000,
+    });
   });
 
   it("speaks the greeting with force_message and does not also response.create that turn", () => {
@@ -186,7 +193,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
         type: "force_message",
         role: "assistant",
         interruptible: false,
-        content: [{ type: "output_text", text: "Olá, fala a Ara." }],
+        content: [{ type: "output_text", text: "Olá, fala a secretária." }],
       },
     });
     expect(grokSend.mock.calls.some((c) => c[0]?.type === "response.create")).toBe(false);
