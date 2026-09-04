@@ -23,4 +23,17 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(payload.session.instructions).toMatch(/português europeu/i);
   });
+
+  it("locks en-GB session instructions and ASR hint", () => {
+    const payload = sessionUpdatePayload({
+      voice: "ara",
+      language: "en-GB",
+      greeting: "Hello, this is Ara.",
+      objective: "Confirm Thursday at 4pm",
+    });
+    expect(payload.session.voice).toBe("ara");
+    expect(payload.session.audio.input.transcription.language_hint).toBe("en");
+    expect(payload.session.instructions).toMatch(/British English/i);
+    expect(payload.session.instructions).not.toMatch(/português europeu/i);
+  });
 });

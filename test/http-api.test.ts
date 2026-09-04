@@ -55,6 +55,7 @@ describe("HTTP API", () => {
     expect(res.body.model).toBe("grok-voice-think-fast-2.0");
     expect(res.body.from).toBe("+351210210260");
     expect(res.body.language).toBe("pt-PT");
+    expect(res.body.languages).toEqual(["pt-PT", "en-GB", "en-US"]);
     expect(res.body.telnyx.connectionId).toBe("3041732714274227469");
     expect(res.body.telnyx.outboundVoiceProfileId).toBe("3041732644774610184");
     expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
@@ -85,18 +86,37 @@ describe("HTTP API", () => {
         objective: "x",
       });
     expect(badLang.status).toBe(400);
+    expect(badLang.body.error).toBe("invalid_language");
+    expect(telnyx.dial).not.toHaveBeenCalled();
 
-    const english = await request(app)
+    const englishGb = await request(app)
       .post("/api/outbound")
       .set("Authorization", "Bearer test-api-key")
       .send({
         to: "+351912345678",
         language: "en-GB",
-        greeting: "Hello",
-        objective: "x",
+        greeting: "Hello, this is Ara.",
+        objective: "Confirm Thursday at 4pm",
       });
-    expect(english.status).toBe(400);
-    expect(english.body.error).toBe("invalid_language");
+    expect(englishGb.status).toBe(201);
+    expect(englishGb.body.language).toBe("en-GB");
+
+    const englishUs = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345677",
+        language: "en-US",
+        objective: "Confirm Thursday at 4pm",
+      });
+    expect(englishUs.status).toBe(201);
+    expect(englishUs.body.language).toBe("en-US");
+    expect(englishUs.body).toMatchObject({ language: "en-US" });
+
+    const gotUs = await request(app)
+      .get(`/api/calls/${englishUs.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(gotUs.body.greeting).toBe("Hi, this is Ara. This call is being recorded.");
 
     const badTo = await request(app)
       .post("/api/outbound")
@@ -108,7 +128,7 @@ describe("HTTP API", () => {
         objective: "x",
       });
     expect(badTo.status).toBe(400);
-    expect(telnyx.dial).not.toHaveBeenCalled();
+    expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
 
   it("dials Telnyx Call Control with bidirectional media streaming and does not use Alice inbound", async () => {
