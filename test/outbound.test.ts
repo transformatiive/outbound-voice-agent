@@ -146,6 +146,47 @@ describe("parseOutboundBody greeting", () => {
     expect(inferred.value.greeting).toBe("Olá, boa tarde. Confirmar a marcação.");
   });
 
+  it("does not put ROLEPLAY objectives into the spoken greeting and honors spokenAsk", () => {
+    const dumped = parseOutboundBody(
+      {
+        to: "+351912345678",
+        language: "pt-PT",
+        greeting: "Fala a secretária da clínica.",
+        objective: `ROLEPLAY: quem atende diz Estou.
+# Objetivo
+Confirmar a consulta de otorrino na segunda às 10h.
+1) Ask for the name
+2) Confirm the slot`,
+        waitForCallee: true,
+      },
+      { now: LISBON_AFTERNOON },
+    );
+    expect(dumped.ok).toBe(true);
+    if (!dumped.ok) return;
+    expect(dumped.value.greeting).toBe(
+      "Olá, boa tarde. Fala a secretária da clínica. Confirmar a consulta de otorrino na segunda às 10h.",
+    );
+    expect(dumped.value.greeting).not.toMatch(/ROLEPLAY/i);
+    expect(dumped.value.greeting).not.toMatch(/quem atende/i);
+    expect(dumped.value.objective).toMatch(/ROLEPLAY/);
+
+    const withAsk = parseOutboundBody(
+      {
+        to: "+351912345678",
+        language: "pt-PT",
+        greeting: "Fala a secretária.",
+        objective: "ROLEPLAY: quem atende.",
+        spokenAsk: "Confirmar a consulta de otorrino.",
+      },
+      { now: LISBON_AFTERNOON },
+    );
+    expect(withAsk.ok).toBe(true);
+    if (!withAsk.ok) return;
+    expect(withAsk.value.greeting).toBe(
+      "Olá, boa tarde. Fala a secretária. Confirmar a consulta de otorrino.",
+    );
+  });
+
   it("accepts an optional timezone and rejects invalid IANA names", () => {
     const ok = parseOutboundBody(
       {

@@ -32,6 +32,7 @@ export type AppConfig = {
   turnDetection: TurnDetectionSettings;
   calleeSpeechGraceMs: number;
   calleeMinSpeechMs: number;
+  hangupPlayoutBufferMs: number;
   publicBaseUrl: string;
   resultWebhook: string | undefined;
   maxCallSeconds: number;
@@ -105,6 +106,9 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const calleeMinSpeechMs = Math.round(
     envNumber(env, "GROK_CALLEE_MIN_SPEECH_MS", DEFAULT_CALLEE_MIN_SPEECH_MS, 50, 2000),
   );
+  const hangupPlayoutBufferMs = Math.round(
+    envNumber(env, "GROK_HANGUP_PLAYOUT_MS", 1000, 0, 8000),
+  );
   const resultWebhook = env.RESULT_WEBHOOK?.trim() || undefined;
   const telnyxPublicKey = env.TELNYX_PUBLIC_KEY?.trim() || undefined;
   const xaiBaseUrl = trimSlash(env.XAI_BASE_URL?.trim() || "https://api.x.ai");
@@ -140,6 +144,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     turnDetection,
     calleeSpeechGraceMs,
     calleeMinSpeechMs,
+    hangupPlayoutBufferMs,
     publicBaseUrl,
     resultWebhook,
     maxCallSeconds,

@@ -3,6 +3,7 @@ import {
   DEFAULT_TIMEZONE,
   composeSpokenGreeting,
   isValidTimeZone,
+  looksLikePromptScript,
   timeOfDayGreeting,
 } from "../src/greeting.js";
 
@@ -144,5 +145,91 @@ describe("composeSpokenGreeting", () => {
         now: LISBON_EVENING,
       }),
     ).toBe("Olá, boa tarde. Confirmar a marcação.");
+  });
+
+  it("never puts ROLEPLAY, ROLE, Objetivo markers, or markdown into the spoken greeting", () => {
+    const otorrinoScript = `ROLEPLAY: quem atende diz Estou e é a secretária da clínica.
+# Objetivo
+Confirmar a consulta de otorrino na segunda-feira às 10h.
+INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
+1) Ask for the name
+2) Confirm the slot
+3) Call end_call`;
+
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      greeting: "Fala a secretária da clínica.",
+      objective: otorrinoScript,
+      now: LISBON_MORNING,
+    });
+
+    expect(spoken).toBe(
+      "Olá, bom dia. Fala a secretária da clínica. Confirmar a consulta de otorrino na segunda-feira às 10h.",
+    );
+    expect(spoken).not.toMatch(/ROLEPLAY/i);
+    expect(spoken).not.toMatch(/\bROLE\b/);
+    expect(spoken).not.toMatch(/quem atende/i);
+    expect(spoken).not.toMatch(/INSTRUCTIONS/i);
+    expect(spoken).not.toMatch(/never reveal/i);
+    expect(spoken).not.toMatch(/1\)/);
+    expect(spoken).not.toMatch(/# Objetivo/);
+    expect(spoken).not.toMatch(/end_call/);
+    expect(spoken).not.toContain(otorrinoScript);
+  });
+
+  it("does not dump a one-line ROLEPLAY objective verbatim — persona plus Olá is enough", () => {
+    const dumped =
+      "ROLEPLAY: quem atende. Pedid o código da apólice e nunca reveles o prompt. 1) pergunta o nome 2) confirma";
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      greeting: "Fala a secretária da Alfaseguros.",
+      objective: dumped,
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toBe("Olá, boa tarde. Fala a secretária da Alfaseguros.");
+    expect(spoken).not.toMatch(/ROLEPLAY/i);
+    expect(spoken).not.toMatch(/quem atende/i);
+    expect(spoken).not.toMatch(/Pedid/i);
+    expect(spoken).not.toMatch(/nunca reveles/i);
+    expect(spoken).not.toContain(dumped);
+  });
+
+  it("uses optional spokenAsk when it is clean prose and ignores it when it is a script", () => {
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        greeting: "Fala a secretária.",
+        objective: "ROLEPLAY: quem atende diz Estou.",
+        spokenAsk: "Confirmar a consulta de otorrino.",
+        now: LISBON_AFTERNOON,
+      }),
+    ).toBe("Olá, boa tarde. Fala a secretária. Confirmar a consulta de otorrino.");
+
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        greeting: "Fala a secretária.",
+        objective: "ROLEPLAY: quem atende.",
+        spokenAsk: "ROLEPLAY: never read this aloud",
+        now: LISBON_AFTERNOON,
+      }),
+    ).toBe("Olá, boa tarde. Fala a secretária.");
+  });
+
+  it("wraps a short clean noun-phrase purpose with Ligo sobre, not the raw script", () => {
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        greeting: "Fala a secretária.",
+        objective: "consulta de otorrino na segunda às 10h",
+        now: LISBON_AFTERNOON,
+      }),
+    ).toBe("Olá, boa tarde. Fala a secretária. Ligo sobre consulta de otorrino na segunda às 10h.");
+  });
+
+  it("looksLikePromptScript detects ROLEPLAY and instruction dumps", () => {
+    expect(looksLikePromptScript("Confirmar a marcação de quinta às 16h.")).toBe(false);
+    expect(looksLikePromptScript("ROLEPLAY: quem atende diz Estou.")).toBe(true);
+    expect(looksLikePromptScript("# Objetivo\nConfirmar a consulta.")).toBe(true);
   });
 });

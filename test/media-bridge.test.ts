@@ -151,6 +151,99 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(call.endedReason).toBe("end_call");
   });
 
+  it("does not hang up on end_call until goodbye response.done plus playout buffer", async () => {
+    vi.useFakeTimers();
+    const hangup = vi.fn(async () => undefined);
+    const telnyxSend = vi.fn();
+    const call = sampleCall();
+    const bridge = new MediaBridge({
+      call,
+      sendGrok: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup },
+      hangupDelayMs: 400,
+      hangupMaxWaitMs: 20_000,
+    });
+    await playGreeting(bridge);
+    telnyxSend.mockClear();
+
+    await bridge.onGrokEvent({ type: "response.created", response_id: "bye" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    expect(telnyxSend).toHaveBeenCalled();
+
+    const hangupP = bridge.onGrokEvent({
+      type: "response.function_call_arguments.done",
+      name: "end_call",
+      call_id: "tool-bye",
+    });
+    await Promise.resolve();
+    expect(hangup).not.toHaveBeenCalled();
+
+    await bridge.onGrokEvent({ type: "response.done" });
+    expect(hangup).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(399);
+    expect(hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await hangupP;
+    expect(hangup).toHaveBeenCalledWith("v2:control-id");
+    expect(call.endedReason).toBe("end_call");
+    vi.useRealTimers();
+  });
+
+  it("holds hangup for remaining PCMU playout of a long confirmation plus buffer", async () => {
+    vi.useFakeTimers();
+    const hangup = vi.fn(async () => undefined);
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup },
+      hangupDelayMs: 200,
+      hangupMaxWaitMs: 20_000,
+    });
+    await playGreeting(bridge);
+
+    await bridge.onGrokEvent({ type: "response.created", response_id: "confirm" });
+    const oneSecondPcmu = Buffer.alloc(8000).toString("base64");
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: oneSecondPcmu });
+    const hangupP = bridge.onGrokEvent({
+      type: "response.function_call_arguments.done",
+      name: "end_call",
+      call_id: "tool-confirm",
+    });
+    await Promise.resolve();
+    await bridge.onGrokEvent({ type: "response.done" });
+    await vi.advanceTimersByTimeAsync(1199);
+    expect(hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await hangupP;
+    expect(hangup).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("unlocks waitForCallee on a 130ms post-grace utterance even with empty ASR", async () => {
+    const clock = { ms: 0 };
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 1100;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    clock.ms = 1230;
+    await bridge.onGrokEvent({
+      type: "input_audio_buffer.speech_stopped",
+      audio_start_ms: 0,
+      audio_end_ms: 130,
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+  });
+
   it("records assistant and user transcripts", () => {
     const bridge = new MediaBridge({
       call: sampleCall(),
@@ -445,13 +538,13 @@ describe("media bridge Telnyx ↔ Grok", () => {
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(forceMessageCount(grokSend)).toBe(0);
 
-    clock.ms = 1200;
+    clock.ms = 1080;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
     expect(forceMessageCount(grokSend)).toBe(0);
 
     clock.ms = 2000;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
-    clock.ms = 2250;
+    clock.ms = 2130;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
     expect(forceMessageCount(grokSend)).toBe(1);
     expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
