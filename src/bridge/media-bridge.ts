@@ -5,6 +5,18 @@ import {
   type TurnDetectionSettings,
 } from "../grok/session.js";
 import type { TelnyxClient } from "../telnyx/client.js";
+import {
+  DEFAULT_CALLEE_MIN_SPEECH_MS,
+  DEFAULT_CALLEE_SPEECH_GRACE_MS,
+  createCalleeSpeechGate,
+  noteStreamStart,
+  onSpeechStarted,
+  onSpeechStopped,
+  onTranscript,
+  type CalleeSpeechDecision,
+  type CalleeSpeechGate,
+  type CalleeSpeechGateConfig,
+} from "./callee-speech.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -18,8 +30,11 @@ export type MediaBridgeOptions = {
   model?: string;
   extraInstructions?: string;
   turnDetection?: TurnDetectionSettings;
+  calleeSpeechGraceMs?: number;
+  calleeMinSpeechMs?: number;
   onEnded?: (call: CallRecord) => void;
   now?: () => string;
+  clockMs?: () => number;
 };
 
 export class MediaBridge {
@@ -31,8 +46,11 @@ export class MediaBridge {
   private readonly voice: string;
   private readonly extraInstructions: string | undefined;
   private readonly turnDetection: TurnDetectionSettings;
+  private readonly calleeSpeechConfig: CalleeSpeechGateConfig;
+  private readonly calleeGate: CalleeSpeechGate;
   private readonly onEnded: ((call: CallRecord) => void) | undefined;
   private readonly now: () => string;
+  private readonly clockMs: () => number;
   private greetingSent = false;
   private hangingUp = false;
   private grokResponsePending = false;
@@ -48,8 +66,14 @@ export class MediaBridge {
     this.voice = opts.voice ?? opts.call.voice;
     this.extraInstructions = opts.extraInstructions ?? opts.call.extraInstructions;
     this.turnDetection = opts.turnDetection ?? DEFAULT_TURN_DETECTION;
+    this.calleeSpeechConfig = {
+      graceMs: opts.calleeSpeechGraceMs ?? DEFAULT_CALLEE_SPEECH_GRACE_MS,
+      minSpeechMs: opts.calleeMinSpeechMs ?? DEFAULT_CALLEE_MIN_SPEECH_MS,
+    };
+    this.calleeGate = createCalleeSpeechGate();
     this.onEnded = opts.onEnded;
     this.now = opts.now ?? (() => new Date().toISOString());
+    this.clockMs = opts.clockMs ?? Date.now;
   }
 
   configureGrokSession(): void {
@@ -75,6 +99,7 @@ export class MediaBridge {
     const wasWaiting = this.call.waitForCallee === true;
     if (wasWaiting) this.cancelPendingGrokResponse();
     this.greetingSent = true;
+    if (wasWaiting) this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     this.sendGrok({
       type: "conversation.item.create",
@@ -95,6 +120,7 @@ export class MediaBridge {
       case "connected":
         return;
       case "start":
+        noteStreamStart(this.calleeGate, this.clockMs());
         if (this.call.status === "answered" || this.call.status === "dialing" || this.call.status === "ringing") {
           this.call.status = "in_progress";
         }
@@ -139,18 +165,45 @@ export class MediaBridge {
         this.forwardGrokAudio(event);
         return;
       }
-      case "input_audio_buffer.speech_started":
-        if (this.speakGreetingAfterCalleeSpeech()) return;
+      case "input_audio_buffer.speech_started": {
+        const waiting = this.isWaitingForCalleeSpeech();
+        const decision = onSpeechStarted(this.calleeGate, waiting, this.clockMs(), this.calleeSpeechConfig);
+        if (waiting) {
+          this.logCalleeGate(decision, "speech_started");
+          return;
+        }
         this.sendTelnyx({ event: "clear" });
         return;
+      }
+      case "input_audio_buffer.speech_stopped": {
+        const waiting = this.isWaitingForCalleeSpeech();
+        const decision = onSpeechStopped(
+          this.calleeGate,
+          waiting,
+          this.clockMs(),
+          this.calleeSpeechConfig,
+          vadAudioDurationMs(event),
+        );
+        if (waiting) {
+          this.logCalleeGate(decision, "speech_stopped");
+          if (decision.unlock) this.speakGreeting();
+        }
+        return;
+      }
       case "conversation.item.input_audio_transcription.completed":
       case "conversation.item.input_audio_transcription.updated": {
         const itemId = typeof event.item_id === "string" ? event.item_id : "";
-        const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
-        if (itemId && transcript) {
-          this.pendingUser.set(itemId, transcript);
-          this.speakGreetingAfterCalleeSpeech();
+        const raw = typeof event.transcript === "string" ? event.transcript : "";
+        const transcript = raw.trim();
+        if (this.isWaitingForCalleeSpeech()) {
+          const decision = onTranscript(true, raw);
+          this.logCalleeGate(decision, "transcript");
+          if (!decision.unlock) return;
+          if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+          this.speakGreeting();
+          return;
         }
+        if (itemId && transcript) this.pendingUser.set(itemId, transcript);
         return;
       }
       case "response.output_audio_transcript.done":
@@ -235,10 +288,13 @@ export class MediaBridge {
     }
   }
 
-  private speakGreetingAfterCalleeSpeech(): boolean {
-    if (!this.isWaitingForCalleeSpeech()) return false;
-    this.speakGreeting();
-    return true;
+  private logCalleeGate(decision: CalleeSpeechDecision, event: string): void {
+    if (decision.unlock) {
+      console.info(`[bridge ${this.call.id}] waitForCallee: unlock via ${decision.reason} (${event})`);
+      return;
+    }
+    if (decision.reason === "not_waiting") return;
+    console.info(`[bridge ${this.call.id}] waitForCallee: greeting blocked (${decision.reason}) on ${event}`);
   }
 
   private flushUserTranscript(): void {
@@ -253,6 +309,17 @@ export class MediaBridge {
     if (last && last.role === line.role && last.text === line.text) return;
     this.call.transcript.push(line);
   }
+}
+
+function vadAudioDurationMs(event: JsonObject): number | undefined {
+  const start = asFiniteNumber(event.audio_start_ms);
+  const end = asFiniteNumber(event.audio_end_ms);
+  if (start === undefined || end === undefined || end < start) return undefined;
+  return end - start;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function delay(ms: number): Promise<void> {

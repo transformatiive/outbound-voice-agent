@@ -1,4 +1,8 @@
 import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "./grok/session.js";
+import {
+  DEFAULT_CALLEE_MIN_SPEECH_MS,
+  DEFAULT_CALLEE_SPEECH_GRACE_MS,
+} from "./bridge/callee-speech.js";
 
 export type ReadyFlags = {
   api: boolean;
@@ -21,6 +25,8 @@ export type AppConfig = {
   grokVoice: string;
   grokModel: string;
   turnDetection: TurnDetectionSettings;
+  calleeSpeechGraceMs: number;
+  calleeMinSpeechMs: number;
   publicBaseUrl: string;
   resultWebhook: string | undefined;
   maxCallSeconds: number;
@@ -86,6 +92,12 @@ export function loadConfig(env: Env = process.env): AppConfig {
       ),
     ),
   };
+  const calleeSpeechGraceMs = Math.round(
+    envNumber(env, "GROK_CALLEE_SPEECH_GRACE_MS", DEFAULT_CALLEE_SPEECH_GRACE_MS, 0, 5000),
+  );
+  const calleeMinSpeechMs = Math.round(
+    envNumber(env, "GROK_CALLEE_MIN_SPEECH_MS", DEFAULT_CALLEE_MIN_SPEECH_MS, 50, 2000),
+  );
   const resultWebhook = env.RESULT_WEBHOOK?.trim() || undefined;
   const telnyxPublicKey = env.TELNYX_PUBLIC_KEY?.trim() || undefined;
   const xaiBaseUrl = trimSlash(env.XAI_BASE_URL?.trim() || "https://api.x.ai");
@@ -118,6 +130,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     grokVoice,
     grokModel,
     turnDetection,
+    calleeSpeechGraceMs,
+    calleeMinSpeechMs,
     publicBaseUrl,
     resultWebhook,
     maxCallSeconds,

@@ -63,6 +63,8 @@ async function handleMediaConnection(
     telnyx: deps.telnyx,
     voice: deps.config.grokVoice,
     turnDetection: deps.config.turnDetection,
+    calleeSpeechGraceMs: deps.config.calleeSpeechGraceMs,
+    calleeMinSpeechMs: deps.config.calleeMinSpeechMs,
     onEnded: deps.onCallEnded,
   });
 

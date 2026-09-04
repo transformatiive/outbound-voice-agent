@@ -27,7 +27,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,
-      silence_duration_ms: 350,
+      silence_duration_ms: 220,
       prefix_padding_ms: 200,
       idle_timeout_ms: 12_000,
       create_response: true,

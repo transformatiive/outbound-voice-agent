@@ -23,6 +23,8 @@ const config: AppConfig = {
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
   turnDetection: DEFAULT_TURN_DETECTION,
+  calleeSpeechGraceMs: 1000,
+  calleeMinSpeechMs: 250,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,
@@ -233,6 +235,16 @@ describe("media stream websocket", () => {
       expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
 
       grokWs.send(JSON.stringify({ type: "input_audio_buffer.speech_started" }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+
+      grokWs.send(
+        JSON.stringify({
+          type: "conversation.item.input_audio_transcription.completed",
+          item_id: "u1",
+          transcript: "Estou",
+        }),
+      );
       const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
       expect((greeting.item as JsonObject).type).toBe("force_message");
       expect(((greeting.item as JsonObject).content as JsonObject[])[0]).toMatchObject({

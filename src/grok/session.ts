@@ -32,14 +32,14 @@ export type TurnDetectionOptions = {
 };
 
 /**
- * Phone-tuned server_vad. silence_duration_ms 350 (was 700) so the agent
- * starts speaking ~0.3s after the callee stops, not ~1–2s later.
+ * Phone-tuned server_vad. silence_duration_ms 220 (was 350) so the agent
+ * starts speaking ~0.2s after the callee stops. Override with GROK_VAD_SILENCE_MS.
  * prefix_padding_ms 200 keeps barge-in audio; idle_timeout_ms is hang-idle, not turn gap.
  * create_response is explicit: false while waitForCallee until the greeting is sent.
  */
 export const DEFAULT_TURN_DETECTION: TurnDetectionSettings = {
   threshold: 0.5,
-  silenceDurationMs: 350,
+  silenceDurationMs: 220,
   prefixPaddingMs: 200,
   idleTimeoutMs: 12_000,
 };
