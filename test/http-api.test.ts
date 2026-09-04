@@ -9,6 +9,7 @@ const config: AppConfig = {
   apiKey: "test-api-key",
   telnyxApiKey: "telnyx-key",
   telnyxConnectionId: "3041732714274227469",
+  telnyxOutboundVoiceProfileId: "3041732644774610184",
   telnyxApiBase: "https://api.telnyx.com",
   telnyxPublicKey: undefined,
   fromNumber: "+351210210260",
@@ -53,6 +54,10 @@ describe("HTTP API", () => {
     expect(res.body.voice).toBe("ara");
     expect(res.body.model).toBe("grok-voice-think-fast-2.0");
     expect(res.body.from).toBe("+351210210260");
+    expect(res.body.language).toBe("pt-PT");
+    expect(res.body.telnyx.connectionId).toBe("3041732714274227469");
+    expect(res.body.telnyx.outboundVoiceProfileId).toBe("3041732644774610184");
+    expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
     expect(res.body.ready.outbound).toBe(true);
   });
 
@@ -80,6 +85,18 @@ describe("HTTP API", () => {
         objective: "x",
       });
     expect(badLang.status).toBe(400);
+
+    const english = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "en-GB",
+        greeting: "Hello",
+        objective: "x",
+      });
+    expect(english.status).toBe(400);
+    expect(english.body.error).toBe("invalid_language");
 
     const badTo = await request(app)
       .post("/api/outbound")
@@ -131,6 +148,17 @@ describe("HTTP API", () => {
     );
     expect(JSON.stringify(dialArg)).not.toMatch(/alice/i);
 
+    const omittedLang = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345679",
+        greeting: "Olá, fala a Ara.",
+        objective: "Confirmar a marcação",
+      });
+    expect(omittedLang.status).toBe(201);
+    expect(omittedLang.body.language).toBe("pt-PT");
+
     const got = await request(app)
       .get(`/api/calls/${res.body.id}`)
       .set("Authorization", "Bearer test-api-key");
@@ -162,9 +190,9 @@ describe("HTTP API", () => {
       .set("Authorization", "Bearer test-api-key")
       .send({
         to: "+351912345678",
-        language: "en-GB",
-        greeting: "Hello",
-        objective: "Confirm booking",
+        language: "pt-PT",
+        greeting: "Olá",
+        objective: "Confirmar marcação",
       });
     expect(res.status).toBe(503);
     expect(telnyx.dial).not.toHaveBeenCalled();

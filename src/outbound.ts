@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
-import { isLanguage } from "./prompt.js";
+import { isLanguage, type Language } from "./prompt.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -24,7 +24,7 @@ export function parseOutboundBody(body: OutboundBody):
       ok: true;
       value: {
         to: string;
-        language: "pt-PT" | "en-GB" | "en-US";
+        language: Language;
         greeting: string;
         objective: string;
         extraInstructions?: string;
@@ -37,8 +37,11 @@ export function parseOutboundBody(body: OutboundBody):
   if (!E164.test(to)) {
     return { ok: false, error: { status: 400, error: "invalid_to", details: "E.164 required, e.g. +351912345678" } };
   }
-  if (!isLanguage(body.language)) {
-    return { ok: false, error: { status: 400, error: "invalid_language", details: "language must be pt-PT | en-GB | en-US" } };
+  const languageRaw = body.language;
+  const language: unknown =
+    languageRaw === undefined || languageRaw === null || languageRaw === "" ? "pt-PT" : languageRaw;
+  if (!isLanguage(language)) {
+    return { ok: false, error: { status: 400, error: "invalid_language", details: "language must be pt-PT" } };
   }
   const greeting = typeof body.greeting === "string" ? body.greeting.trim() : "";
   const objective = typeof body.objective === "string" ? body.objective.trim() : "";
@@ -61,7 +64,7 @@ export function parseOutboundBody(body: OutboundBody):
     ok: true,
     value: {
       to,
-      language: body.language,
+      language,
       greeting,
       objective,
       ...(extra ? { extraInstructions: extra } : {}),

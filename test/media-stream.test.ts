@@ -13,6 +13,7 @@ const config: AppConfig = {
   apiKey: "test-api-key",
   telnyxApiKey: "telnyx-key",
   telnyxConnectionId: "3041732714274227469",
+  telnyxOutboundVoiceProfileId: "3041732644774610184",
   telnyxApiBase: "https://api.telnyx.com",
   telnyxPublicKey: undefined,
   fromNumber: "+351210210260",

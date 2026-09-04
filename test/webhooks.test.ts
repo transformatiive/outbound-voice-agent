@@ -10,6 +10,7 @@ const config: AppConfig = {
   apiKey: "test-api-key",
   telnyxApiKey: "telnyx-key",
   telnyxConnectionId: "3041732714274227469",
+  telnyxOutboundVoiceProfileId: "3041732644774610184",
   telnyxApiBase: "https://api.telnyx.com",
   telnyxPublicKey: undefined,
   fromNumber: "+351210210260",
@@ -46,9 +47,9 @@ describe("Telnyx webhooks", () => {
       .set("Authorization", "Bearer test-api-key")
       .send({
         to: "+351910000001",
-        language: "en-US",
-        greeting: "Hi, this is Ara.",
-        objective: "Confirm an appointment",
+        language: "pt-PT",
+        greeting: "Olá, fala a Ara.",
+        objective: "Confirmar uma marcação",
       });
     const id = created.body.id as string;
     const clientState = Buffer.from(id, "utf8").toString("base64");
@@ -137,9 +138,9 @@ describe("Telnyx webhooks", () => {
       .set("Authorization", "Bearer test-api-key")
       .send({
         to: "+351910000002",
-        language: "en-GB",
-        greeting: "Hello",
-        objective: "Leave a reminder",
+        language: "pt-PT",
+        greeting: "Olá",
+        objective: "Deixar um lembrete",
       });
     const clientState = Buffer.from(created.body.id, "utf8").toString("base64");
     await request(app)

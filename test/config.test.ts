@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 
 describe("config", () => {
-  it("defaults caller ID, Grok voice ara, and Live 2 model", () => {
+  it("defaults caller ID, Grok voice ara, Live 2 model, and Telnyx app/OVP ids", () => {
     const cfg = loadConfig({
       API_KEY: "k",
       TELNYX_API_KEY: "t",
-      TELNYX_CONNECTION_ID: "3041732714274227469",
       XAI_API_KEY: "x",
       PUBLIC_BASE_URL: "https://example.up.railway.app",
     });
@@ -14,13 +13,13 @@ describe("config", () => {
     expect(cfg.grokVoice).toBe("ara");
     expect(cfg.grokModel).toBe("grok-voice-think-fast-2.0");
     expect(cfg.telnyxConnectionId).toBe("3041732714274227469");
+    expect(cfg.telnyxOutboundVoiceProfileId).toBe("3041732644774610184");
     expect(cfg.publicBaseUrl).toBe("https://example.up.railway.app");
   });
 
-  it("treats outbound as unready when Telnyx connection id is missing", () => {
+  it("treats outbound as unready when Telnyx API key is missing", () => {
     const cfg = loadConfig({
       API_KEY: "k",
-      TELNYX_API_KEY: "t",
       XAI_API_KEY: "x",
       PUBLIC_BASE_URL: "https://example.up.railway.app",
     });
@@ -32,7 +31,6 @@ describe("config", () => {
     const cfg = loadConfig({
       API_KEY: "k",
       TELNYX_API_KEY: "t",
-      TELNYX_CONNECTION_ID: "3041732714274227469",
       XAI_API_KEY: "x",
       PUBLIC_BASE_URL: "https://voice.example.com/",
     });

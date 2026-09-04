@@ -8,17 +8,19 @@ describe("Grok Voice Live 2 session", () => {
     );
   });
 
-  it("pins voice ara and PCMU for Telnyx PSTN passthrough", () => {
+  it("pins voice ara, PT-PT, and PCMU for Telnyx PSTN passthrough", () => {
     const payload = sessionUpdatePayload({
       voice: "ara",
-      language: "en-GB",
-      greeting: "Hello",
-      objective: "Confirm booking",
+      language: "pt-PT",
+      greeting: "Olá, fala a Ara.",
+      objective: "Confirmar marcação",
     });
     expect(payload.type).toBe("session.update");
     expect(payload.session.voice).toBe("ara");
     expect(payload.session.audio.input.format.type).toBe("audio/pcmu");
     expect(payload.session.audio.output.format.type).toBe("audio/pcmu");
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
+    expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
+    expect(payload.session.instructions).toMatch(/português europeu/i);
   });
 });

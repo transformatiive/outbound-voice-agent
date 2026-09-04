@@ -10,6 +10,7 @@ export type AppConfig = {
   apiKey: string;
   telnyxApiKey: string;
   telnyxConnectionId: string;
+  telnyxOutboundVoiceProfileId: string;
   telnyxApiBase: string;
   telnyxPublicKey: string | undefined;
   fromNumber: string;
@@ -42,7 +43,9 @@ function toWssOrigin(httpsOrigin: string): string {
 export function loadConfig(env: Env = process.env): AppConfig {
   const apiKey = env.API_KEY?.trim() ?? "";
   const telnyxApiKey = env.TELNYX_API_KEY?.trim() ?? "";
-  const telnyxConnectionId = env.TELNYX_CONNECTION_ID?.trim() ?? "";
+  const telnyxConnectionId = env.TELNYX_CONNECTION_ID?.trim() || "3041732714274227469";
+  const telnyxOutboundVoiceProfileId =
+    env.TELNYX_OUTBOUND_VOICE_PROFILE_ID?.trim() || "3041732644774610184";
   const xaiApiKey = env.XAI_API_KEY?.trim() ?? "";
   const publicBaseUrl = trimSlash(env.PUBLIC_BASE_URL?.trim() ?? "");
   const fromNumber = env.FROM_NUMBER?.trim() || "+351210210260";
@@ -71,6 +74,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     apiKey,
     telnyxApiKey,
     telnyxConnectionId,
+    telnyxOutboundVoiceProfileId,
     telnyxApiBase,
     telnyxPublicKey,
     fromNumber,

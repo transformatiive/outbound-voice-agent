@@ -2,20 +2,29 @@
 
 Outbound-only **Grok Voice Live 2** agent over **Telnyx Call Control** (Alfaseguros).
 
-This service places PSTN calls from caller ID **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, then hangs up. It is **not** Alice (no inbound SIP, no Alfaseguros inbound receptionist prompt).
+Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. **Portuguese of Portugal (pt-PT) only.** Not Alice.
 
-Tests never place real phone calls. Do not dial live numbers from CI or local test runs.
+Tests never place real phone calls.
+
+## Telnyx (TRNSF)
+
+| | |
+| --- | --- |
+| Call Control app | **TRNSX-Outbound-Grok** `TELNYX_CONNECTION_ID=3041732714274227469` |
+| Outbound Voice Profile | `TELNYX_OUTBOUND_VOICE_PROFILE_ID=3041732644774610184` (bound to the app) |
+| Caller ID | `FROM_NUMBER=+351210210260` |
+| Webhook | `{PUBLIC_BASE_URL}/webhooks/telnyx` |
+
+Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after merge.
 
 ## Call flow
 
 1. `POST /api/outbound` → Telnyx `POST /v2/calls` with bidirectional media streaming.
 2. Telnyx connects to `wss://…/media-stream`.
-3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2).
-4. Greeting is spoken verbatim (`force_message`), then the model works the objective.
+3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2, voice `ara`).
+4. Greeting is spoken verbatim (`force_message`), then the model works the objective in pt-PT.
 5. The model calls `end_call` → Telnyx hangup.
 6. Optional `RESULT_WEBHOOK` receives the transcript and outcome.
-
-Languages: `pt-PT` | `en-GB` | `en-US`.
 
 ## HTTP API
 
@@ -29,6 +38,8 @@ Languages: `pt-PT` | `en-GB` | `en-US`.
 
 ### `POST /api/outbound`
 
+`language` is optional and must be `pt-PT` when sent (default `pt-PT`).
+
 ```json
 {
   "to": "+351912345678",
@@ -41,48 +52,27 @@ Languages: `pt-PT` | `en-GB` | `en-US`.
 }
 ```
 
-`201` response:
+## Telnyx dial
 
-```json
-{
-  "id": "uuid",
-  "status": "dialing",
-  "to": "+351912345678",
-  "from": "+351210210260",
-  "language": "pt-PT",
-  "voice": "ara",
-  "model": "grok-voice-think-fast-2.0",
-  "createdAt": "…"
-}
-```
+`POST https://api.telnyx.com/v2/calls` with:
 
-## Telnyx
-
-Outbound uses Call Control `POST https://api.telnyx.com/v2/calls` with:
-
-- `connection_id` from `TELNYX_CONNECTION_ID` (ops: `3041732714274227469`)
-- `from` = `FROM_NUMBER` (default `+351210210260`)
-- `stream_url` pointing at this service’s media WebSocket
-- `stream_bidirectional_mode=rtp`
-- `stream_bidirectional_codec=PCMU` (passthrough to Grok `audio/pcmu`, 8 kHz)
-- `stream_bidirectional_target_legs=self` (required for API-originated outbound legs)
+- `connection_id` = `TELNYX_CONNECTION_ID` (TRNSX-Outbound-Grok)
+- `from` = `+351210210260`
+- `stream_url` → this service’s media WebSocket
+- `stream_bidirectional_mode=rtp`, codec `PCMU`, `stream_bidirectional_target_legs=self`
 - `webhook_url` = `{PUBLIC_BASE_URL}/webhooks/telnyx`
 
-In Mission Control, point the Call Control Application webhook at `https://<this-host>/webhooks/telnyx` as a fallback.
+The OVP is associated with the Call Control application in Mission Control, not sent on each dial.
 
 ## Environment
 
-See [`.env.example`](.env.example). Required to actually dial:
-
-`TELNYX_API_KEY`, `TELNYX_CONNECTION_ID`, `FROM_NUMBER`, `XAI_API_KEY`, `API_KEY`, `PUBLIC_BASE_URL`.
-
-Optional: `GROK_VOICE` (default `ara`), `GROK_MODEL` (default `grok-voice-think-fast-2.0`), `RESULT_WEBHOOK`, `TELNYX_PUBLIC_KEY`.
+See [`.env.example`](.env.example).
 
 ## Run locally
 
 ```bash
 npm ci
-cp .env.example .env   # fill keys; tests do not need a live Telnyx dial
+cp .env.example .env   # tests do not need live Telnyx/xAI keys
 npm test
 npm run typecheck
 npm run dev            # http://localhost:3000/health
@@ -90,17 +80,10 @@ npm run dev            # http://localhost:3000/health
 
 ## Railway
 
-`railway.json` health-checks `GET /health`. Nixpacks uses `npm run build` then `npm start`. Set the env vars on the service; `PORT` is injected.
-
-```bash
-railway variables set PUBLIC_BASE_URL=https://<your-service>.up.railway.app
-railway variables set FROM_NUMBER=+351210210260
-railway variables set GROK_VOICE=ara
-# TELNYX_CONNECTION_ID=3041732714274227469  (ops)
-```
+`railway.json` health-checks `GET /health`. Point the Telnyx Call Control app webhook at `https://<service>/webhooks/telnyx` once `PUBLIC_BASE_URL` is known.
 
 In-memory call state is per replica. Run a single instance.
 
 ## Audio
 
-Telnyx bidirectional PCMU 8 kHz ↔ Grok Voice `audio/pcmu`. No resampler. Caller barge-in sends Telnyx `clear`.
+Telnyx bidirectional PCMU 8 kHz ↔ Grok Voice `audio/pcmu`. Caller barge-in sends Telnyx `clear`.

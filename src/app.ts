@@ -57,8 +57,14 @@ export function createApp(deps: AppDeps): CreatedApp {
       ok: true,
       service: "outbound-voice-agent",
       voice: deps.config.grokVoice,
+      language: "pt-PT",
       model: deps.config.grokModel,
       from: deps.config.fromNumber,
+      telnyx: {
+        connectionId: deps.config.telnyxConnectionId,
+        outboundVoiceProfileId: deps.config.telnyxOutboundVoiceProfileId,
+        webhookPath: "/webhooks/telnyx",
+      },
       ready: deps.config.ready,
     });
   });
