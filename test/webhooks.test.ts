@@ -20,6 +20,8 @@ const config: AppConfig = {
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
   turnDetection: DEFAULT_TURN_DETECTION,
+  calleeSpeechGraceMs: 1000,
+  calleeMinSpeechMs: 250,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,
