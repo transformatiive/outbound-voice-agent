@@ -35,6 +35,7 @@ export class MediaBridge {
   private readonly now: () => string;
   private greetingSent = false;
   private hangingUp = false;
+  private grokResponsePending = false;
   private readonly pendingUser = new Map<string, string>();
   private grokConfigured = false;
 
@@ -52,6 +53,7 @@ export class MediaBridge {
   }
 
   configureGrokSession(): void {
+    const waitForCallee = this.isWaitingForCalleeSpeech();
     this.sendGrok(
       sessionUpdatePayload({
         voice: this.voice,
@@ -61,7 +63,7 @@ export class MediaBridge {
         ...(this.extraInstructions !== undefined
           ? { extraInstructions: this.extraInstructions }
           : {}),
-        ...(this.call.waitForCallee === true ? { waitForCallee: true } : {}),
+        ...(waitForCallee ? { waitForCallee: true } : {}),
         turnDetection: this.turnDetection,
       }) as unknown as JsonObject,
     );
@@ -70,6 +72,8 @@ export class MediaBridge {
 
   speakGreeting(): void {
     if (this.greetingSent) return;
+    const wasWaiting = this.call.waitForCallee === true;
+    if (wasWaiting) this.cancelPendingGrokResponse();
     this.greetingSent = true;
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     this.sendGrok({
@@ -81,6 +85,8 @@ export class MediaBridge {
         content: [{ type: "output_text", text: this.call.greeting }],
       },
     });
+    // Re-enable server_vad auto-response only after the scripted greeting is queued.
+    if (wasWaiting) this.configureGrokSession();
   }
 
   onTelnyxMessage(message: JsonObject): void {
@@ -118,12 +124,19 @@ export class MediaBridge {
       case "session.updated":
         if (this.call.waitForCallee !== true) this.speakGreeting();
         return;
+      case "response.created":
+        this.grokResponsePending = true;
+        if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse();
+        return;
+      case "response.done":
+        this.grokResponsePending = false;
+        return;
+      case "input_audio_buffer.timeout_triggered":
+        if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse(true);
+        return;
       case "response.output_audio.delta":
       case "response.audio.delta": {
-        const delta = typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
-        if (typeof delta === "string" && delta.length > 0) {
-          this.sendTelnyx({ event: "media", media: { payload: delta } });
-        }
+        this.forwardGrokAudio(event);
         return;
       }
       case "input_audio_buffer.speech_started":
@@ -142,6 +155,7 @@ export class MediaBridge {
       }
       case "response.output_audio_transcript.done":
       case "response.audio_transcript.done": {
+        if (this.isWaitingForCalleeSpeech()) return;
         this.flushUserTranscript();
         const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
         if (transcript) this.pushTranscript({ role: "assistant", text: transcript });
@@ -202,8 +216,27 @@ export class MediaBridge {
     this.onEnded?.(this.call);
   }
 
+  private isWaitingForCalleeSpeech(): boolean {
+    return this.call.waitForCallee === true && !this.greetingSent;
+  }
+
+  private cancelPendingGrokResponse(force = false): void {
+    if (!force && !this.grokResponsePending) return;
+    this.sendGrok({ type: "response.cancel" });
+    this.grokResponsePending = false;
+  }
+
+  private forwardGrokAudio(event: JsonObject): void {
+    if (this.isWaitingForCalleeSpeech()) return;
+    const delta =
+      typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
+    if (typeof delta === "string" && delta.length > 0) {
+      this.sendTelnyx({ event: "media", media: { payload: delta } });
+    }
+  }
+
   private speakGreetingAfterCalleeSpeech(): boolean {
-    if (this.call.waitForCallee !== true || this.greetingSent) return false;
+    if (!this.isWaitingForCalleeSpeech()) return false;
     this.speakGreeting();
     return true;
   }

@@ -30,6 +30,8 @@ describe("Grok Voice Live 2 session", () => {
       silence_duration_ms: 350,
       prefix_padding_ms: 200,
       idle_timeout_ms: 12_000,
+      create_response: true,
+      interrupt_response: true,
     });
     expect(payload.session.reasoning).toEqual({ effort: "none" });
   });
@@ -44,6 +46,9 @@ describe("Grok Voice Live 2 session", () => {
     });
     expect(payload.session.instructions).toMatch(/Espera em silêncio até o destinatário falar/i);
     expect(payload.session.instructions).not.toMatch(/já está a ser dita/i);
+    expect(payload.session.turn_detection.create_response).toBe(false);
+    expect(payload.session.turn_detection.idle_timeout_ms).toBeUndefined();
+    expect(payload.session.turn_detection.interrupt_response).toBe(true);
   });
 
   it("locks en-GB session instructions and ASR hint", () => {

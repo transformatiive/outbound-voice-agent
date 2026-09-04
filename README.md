@@ -26,7 +26,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 1. `POST /api/outbound` → Telnyx `POST /v2/calls` with bidirectional media streaming.
 2. Telnyx connects to `wss://…/media-stream`.
 3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2, voice `ara`).
-4. Greeting is spoken verbatim (`force_message`), then the model works the objective in the requested language (`pt-PT`, `en-GB`, or `en-US`). With `waitForCallee: true`, the greeting waits until the callee speaks first.
+4. Greeting is spoken verbatim (`force_message`), then the model works the objective in the requested language (`pt-PT`, `en-GB`, or `en-US`). With `waitForCallee: true`, the bridge stays mute until the callee speaks (no `force_message`, no `response.create`, Grok `create_response` off, outbound audio dropped), then the greeting is delivered once.
 5. The model calls `end_call` → Telnyx hangup.
 6. Optional `RESULT_WEBHOOK` receives the transcript and outcome.
 
@@ -46,7 +46,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 `greeting` is the spoken persona line. Pass it on every dial that should introduce a secretary or other identity. If omitted (and `waitForCallee` is not true), only a neutral fallback is spoken — `Olá.` (`pt-PT`) or `Hello.` (`en-GB` / `en-US`) — no product name and no recording line. When `waitForCallee` is true (or inferred from wait-until-callee instructions), `greeting` is required (400 `invalid_greeting`).
 
-`waitForCallee` is optional (default `false`). When `true`, the agent does not speak on `session.updated`; it waits for first callee speech (`input_audio_buffer.speech_started` or a non-empty user transcription), then speaks the greeting once. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request and always pass the persona greeting.
+`waitForCallee` is optional (default `false`). When `true`, the bridge does not speak on `session.updated`, stream start, or Grok session create. Grok `turn_detection.create_response` is `false` (so the model cannot auto-greet), outbound audio is dropped, and any premature `response.created` is cancelled. The greeting is spoken once via `force_message` after first callee speech (`input_audio_buffer.speech_started` or a non-empty user transcription). Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request and always pass the persona greeting. Prompt text alone is not what keeps the line silent.
 
 - `pt-PT` — European Portuguese (never Brazilian). Neutral fallback if `greeting` is omitted: `Olá.`
 - `en-GB` — natural British English. Neutral fallback: `Hello.`
