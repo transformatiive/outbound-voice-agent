@@ -12,7 +12,7 @@ describe("config", () => {
     expect(cfg.fromNumber).toBe("+351210210260");
     expect(cfg.grokVoice).toBe("ara");
     expect(cfg.grokModel).toBe("grok-voice-think-fast-2.0");
-    expect(cfg.grokVoiceSpeed).toBe(1);
+    expect(cfg.grokVoiceSpeed).toBe(1.05);
     expect(cfg.telnyxConnectionId).toBe("3041732714274227469");
     expect(cfg.telnyxOutboundVoiceProfileId).toBe("3041732644774610184");
     expect(cfg.publicBaseUrl).toBe("https://example.up.railway.app");

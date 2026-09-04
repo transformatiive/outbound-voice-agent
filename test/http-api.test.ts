@@ -121,7 +121,7 @@ describe("HTTP API", () => {
     const gotUs = await request(app)
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotUs.body.greeting).toBe("Hello.");
+    expect(gotUs.body.greeting).toMatch(/^Hello, good (morning|afternoon|evening)\. Confirm Thursday at 4pm\.$/);
     expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
     const badTo = await request(app)
@@ -190,7 +190,9 @@ describe("HTTP API", () => {
       .set("Authorization", "Bearer test-api-key");
     expect(got.status).toBe(200);
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
-    expect(got.body.greeting).toBe("Olá, fala a secretária.");
+    expect(got.body.greeting).toMatch(
+      /^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária\. Confirmar a marcação de quinta às 16h\.$/,
+    );
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
     expect(got.body.waitForCallee).toBe(false);
     expect(res.body.waitForCallee).toBe(false);
@@ -259,7 +261,7 @@ describe("HTTP API", () => {
     expect(telnyx.dial).toHaveBeenCalledTimes(3);
   });
 
-  it("uses a neutral Olá./Hello. when greeting is omitted, and requires greeting with waitForCallee", async () => {
+  it("composes Olá + time-of-day + purpose when greeting is omitted, including waitForCallee", async () => {
     const { app } = createApp({ config, telnyx });
     const omittedPt = await request(app)
       .post("/api/outbound")
@@ -273,7 +275,7 @@ describe("HTTP API", () => {
     const gotPt = await request(app)
       .get(`/api/calls/${omittedPt.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotPt.body.greeting).toBe("Olá.");
+    expect(gotPt.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Confirmar a marcação\.$/);
     expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
 
     const waitMissing = await request(app)
@@ -285,9 +287,13 @@ describe("HTTP API", () => {
         objective: "Confirmar a marcação",
         waitForCallee: true,
       });
-    expect(waitMissing.status).toBe(400);
-    expect(waitMissing.body.error).toBe("invalid_greeting");
-    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+    expect(waitMissing.status).toBe(201);
+    expect(waitMissing.body.waitForCallee).toBe(true);
+    const gotWait = await request(app)
+      .get(`/api/calls/${waitMissing.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(gotWait.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Confirmar a marcação\.$/);
+    expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
 
   it("GET /api/calls/:id requires auth and 404s unknown ids", async () => {

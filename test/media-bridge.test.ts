@@ -188,7 +188,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.voice).toBe("ara");
     expect(update.session.audio.input.format).toEqual({ type: "audio/pcmu" });
     expect(update.session.audio.output.format).toEqual({ type: "audio/pcmu" });
-    expect(update.session.audio.output.speed).toBe(1);
+    expect(update.session.audio.output.speed).toBe(1.05);
     expect(update.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(update.session.tools[0].name).toBe("end_call");
     expect(update.session.turn_detection).toEqual({

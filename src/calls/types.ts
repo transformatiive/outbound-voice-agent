@@ -24,6 +24,7 @@ export type CallRecord = {
   greeting: string;
   objective: string;
   waitForCallee?: boolean;
+  timezone?: string;
   extraInstructions?: string;
   metadata?: Record<string, unknown>;
   voice: string;

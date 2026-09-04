@@ -44,8 +44,8 @@ export const DEFAULT_TURN_DETECTION: TurnDetectionSettings = {
   idleTimeoutMs: 12_000,
 };
 
-/** Documented xAI session.audio.output.speed range is 0.7–1.5. Default 1.0. */
-export const DEFAULT_OUTPUT_SPEED = 1;
+/** Documented xAI session.audio.output.speed range is 0.7–1.5. Slight liveliness nudge above API default 1.0. */
+export const DEFAULT_OUTPUT_SPEED = 1.05;
 
 export type GrokSessionUpdate = {
   type: "session.update";
@@ -102,6 +102,8 @@ export function sessionUpdatePayload(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  timezone?: string;
+  timeGreeting?: string;
   turnDetection?: TurnDetectionSettings;
   createResponse?: boolean;
   includeIdleTimeout?: boolean;

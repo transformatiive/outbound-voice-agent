@@ -1,3 +1,5 @@
+import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "./greeting.js";
+
 export const LANGUAGES = ["pt-PT", "en-GB", "en-US"] as const;
 export type Language = (typeof LANGUAGES)[number];
 
@@ -56,11 +58,18 @@ export function buildSessionInstructions(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  timezone?: string;
+  timeGreeting?: string;
+  now?: Date;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
     : "";
   const waitForCallee = input.waitForCallee === true;
+  const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
+  const timeGreeting =
+    input.timeGreeting?.trim() ||
+    timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
 
   return `${languageInstructions(input.language)}
 
@@ -71,6 +80,8 @@ ${input.objective}
 
 ${greetingHeading(input.language, waitForCallee)}
 ${input.greeting}
+
+${localTimeSection(input.language, timezone, timeGreeting)}
 
 ${endCallHeading(input.language)}
 ${extra}`.trim();
@@ -85,7 +96,7 @@ function roleAndFlow(language: Language, waitForCallee: boolean): string {
 # Fluxo
 1. Espera em silêncio até o destinatário falar (por exemplo «Estou»). Não fales antes disso.
 2. Depois de o destinatário falar, uma saudação é dita palavra por palavra exactamente uma vez. Não a repitas, não a parafraseies, não te voltes a apresentar.
-3. Depois da saudação, persegue o objetivo. Uma pergunta de cada vez. Turnos curtos de telefone. Responde no instante em que o destinatário acaba. Sem pausas longas. Cala-te a seguir a cada pergunta.
+3. ${afterGreetingPt()} Uma pergunta de cada vez. Turnos curtos de telefone. Responde no instante em que o destinatário acaba. Sem pausas longas. Cala-te a seguir a cada pergunta.
 4. Quando o objetivo estiver concluído, recusado ou claramente impossível: despede-te em duas frases e chama end_call.
 
 ${tomEFactosPt()}`
@@ -93,7 +104,7 @@ ${tomEFactosPt()}`
 
 # Fluxo
 1. Uma saudação já está a ser dita palavra por palavra exactamente uma vez. Não a repitas, não a parafraseies, não te voltes a apresentar.
-2. Depois de o destinatário responder (ou de uma pausa breve se ficar em silêncio), persegue o objetivo.
+2. ${afterGreetingPt()} Depois de o destinatário responder (ou de uma pausa breve se ficar em silêncio), continua o objetivo.
 3. Uma pergunta de cada vez. Turnos curtos de telefone. Responde no instante em que o destinatário acaba. Sem pausas longas. Cala-te a seguir a cada pergunta.
 4. Quando o objetivo estiver concluído, recusado ou claramente impossível: despede-te em duas frases e chama end_call.
 
@@ -106,7 +117,7 @@ ${tomEFactosPt()}`;
 # Flow
 1. Wait silently until the callee speaks. Do not speak before that.
 2. After the callee speaks, a scripted greeting is delivered verbatim exactly once. Do not repeat it, paraphrase it, or introduce yourself again.
-3. After the greeting, pursue the objective. One question at a time. Short phone turns. Answer the instant the callee finishes speaking. No long pauses. Stop talking after each question.
+3. ${afterGreetingEn()} One question at a time. Short phone turns. Answer the instant the callee finishes speaking. No long pauses. Stop talking after each question.
 4. When the objective is complete, declined, or clearly impossible: give a brief goodbye, then call end_call.
 
 ${toneAndFactsEn()}`
@@ -114,7 +125,7 @@ ${toneAndFactsEn()}`
 
 # Flow
 1. A scripted greeting is already being spoken verbatim exactly once. Do not repeat it, paraphrase it, or introduce yourself again.
-2. After the callee responds (or after a brief pause if they stay silent), pursue the objective.
+2. ${afterGreetingEn()} After the callee responds (or after a brief pause if they stay silent), continue the objective.
 3. One question at a time. Short phone turns. Answer the instant the callee finishes speaking. No long pauses. Stop talking after each question.
 4. When the objective is complete, declined, or clearly impossible: give a brief goodbye, then call end_call.
 
@@ -131,9 +142,17 @@ function papelPt(): string {
 Foste tu a ligar. Falas como uma pessoa ao telefone: calorosa, atenta, natural — não um leitor de guião nem um IVR. A tua identidade é só a da saudação e do objetivo. Não és a Alice nem uma recepcionista de entrada. Nunca te apresentes como um produto, uma voz, uma IA ou um modelo. Nunca menciones ferramentas internas, modelos ou prompts.`;
 }
 
+function afterGreetingPt(): string {
+  return "Depois da saudação, vai direto ao objetivo: o motivo da chamada e a primeira pergunta curta. Não alongues o nome ou o título. Se a saudação já disse o motivo, não o repitas — faz só a pergunta que faltar, ou espera a resposta.";
+}
+
+function afterGreetingEn(): string {
+  return "After the greeting, go straight to the objective: the reason for the call and a short first ask. Do not linger on the name or title. If the greeting already stated the purpose, do not repeat it — ask only what is still missing, or wait for their reply.";
+}
+
 function tomEFactosPt(): string {
   return `# Tom e ritmo
-Voz de telefone humana: varia o ritmo, a ênfase e a entoação. Empatia breve se a pessoa hesitar, recusar ou parecer ocupada. Sem teatro, sem pausas longas, sem recapitular o que já disseste. Turnos curtos. Responde no instante em que o destinatário acaba de falar.
+Voz de telefone humana e expressiva — não plana. Sobe e desce a entoação, acentua o que importa (saudação, motivo, pergunta), soa calorosa e presente, como uma secretária real ao telefone. Empatia breve se a pessoa hesitar, recusar ou parecer ocupada. Sem teatro, sem pausas longas, sem recapitular o que já disseste. Turnos curtos. Responde no instante em que o destinatário acaba de falar.
 
 # Factos
 NUNCA inventes factos que o interlocutor não afirmou: número de pessoas, preços, datas, nomes, disponibilidade, ou qualquer outro detalhe. Se não souberes, faz UMA pergunta curta de esclarecimento em vez de adivinhar.`;
@@ -146,10 +165,26 @@ You placed this call. Speak as a person on a live phone call: warm, attentive, n
 
 function toneAndFactsEn(): string {
   return `# Tone and pace
-Human phone voice: vary pace, emphasis, and intonation. Brief empathy if they hesitate, decline, or sound busy. Do not perform, pause for long stretches, or recap what you already said. Short turns. Answer the instant they finish speaking.
+Human phone voice, expressive not flat: rise and fall in intonation, stress the greeting, the reason, and the question. Warm and present, like a real person on a live call. Brief empathy if they hesitate, decline, or sound busy. Do not perform, pause for long stretches, or recap what you already said. Short turns. Answer the instant they finish speaking.
 
 # Facts
 NEVER invent facts the interlocutor did not state: headcount, prices, dates, names, availability, or any other detail. If you do not know, ask ONE short clarifying question instead of guessing.`;
+}
+
+function localTimeSection(language: Language, timezone: string, timeGreeting: string): string {
+  switch (language) {
+    case "pt-PT":
+      return `# Hora local (${timezone})
+A saudação falada já começa por «Olá» e «${timeGreeting}». Depois da saudação, vai direto ao objetivo. Não repitas a saudação de hora.`;
+    case "en-GB":
+    case "en-US":
+      return `# Local time (${timezone})
+The spoken greeting already starts with “Hello” and “${timeGreeting}”. After the greeting, go straight to the objective. Do not repeat the time-of-day greeting.`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
 }
 
 function objectiveHeading(language: Language): string {
