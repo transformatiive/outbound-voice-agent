@@ -1,0 +1,31 @@
+{
+  "name": "outbound-voice-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Outbound-only Grok Voice agent over Telnyx Call Control (Alfaseguros).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.10",
+    "@types/supertest": "^6.0.3",
+    "@types/ws": "^8.18.1",
+    "supertest": "^7.1.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.9"
+  }
+}
