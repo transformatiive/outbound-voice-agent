@@ -54,6 +54,7 @@ export class MediaBridge {
         ...(this.extraInstructions !== undefined
           ? { extraInstructions: this.extraInstructions }
           : {}),
+        ...(this.call.waitForCallee === true ? { waitForCallee: true } : {}),
       }) as unknown as JsonObject,
     );
     this.grokConfigured = true;
@@ -106,7 +107,7 @@ export class MediaBridge {
         if (!this.grokConfigured) this.configureGrokSession();
         return;
       case "session.updated":
-        this.speakGreeting();
+        if (this.call.waitForCallee !== true) this.speakGreeting();
         return;
       case "response.output_audio.delta":
       case "response.audio.delta": {
@@ -117,13 +118,17 @@ export class MediaBridge {
         return;
       }
       case "input_audio_buffer.speech_started":
+        if (this.speakGreetingAfterCalleeSpeech()) return;
         this.sendTelnyx({ event: "clear" });
         return;
       case "conversation.item.input_audio_transcription.completed":
       case "conversation.item.input_audio_transcription.updated": {
         const itemId = typeof event.item_id === "string" ? event.item_id : "";
         const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
-        if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+        if (itemId && transcript) {
+          this.pendingUser.set(itemId, transcript);
+          this.speakGreetingAfterCalleeSpeech();
+        }
         return;
       }
       case "response.output_audio_transcript.done":
@@ -186,6 +191,12 @@ export class MediaBridge {
     this.call.endedAt = this.now();
     this.flushUserTranscript();
     this.onEnded?.(this.call);
+  }
+
+  private speakGreetingAfterCalleeSpeech(): boolean {
+    if (this.call.waitForCallee !== true || this.greetingSent) return false;
+    this.speakGreeting();
+    return true;
   }
 
   private flushUserTranscript(): void {

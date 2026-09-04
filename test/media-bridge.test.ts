@@ -191,4 +191,109 @@ describe("media bridge Telnyx ↔ Grok", () => {
     });
     expect(grokSend.mock.calls.some((c) => c[0]?.type === "response.create")).toBe(false);
   });
+
+  it("speaks the greeting immediately on session.updated by default", async () => {
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(grokSend.mock.calls[0]?.[0]).toMatchObject({
+      type: "conversation.item.create",
+      item: { type: "force_message" },
+    });
+  });
+
+  it("does not speak on session.updated when waitForCallee is true", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(telnyxSend).not.toHaveBeenCalled();
+  });
+
+  it("speaks the greeting once on first callee speech_started when waitForCallee is true", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
+
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+  });
+
+  it("speaks the greeting once on first non-empty user transcription when waitForCallee is true", async () => {
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "   ",
+    });
+    expect(forceMessageCount(grokSend)).toBe(0);
+
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u2",
+      transcript: "Estou",
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+
+    grokSend.mockClear();
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.updated",
+      item_id: "u3",
+      transcript: "Estou sim",
+    });
+    expect(forceMessageCount(grokSend)).toBe(0);
+  });
+
+  it("includes waitForCallee in session.update instructions", () => {
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.configureGrokSession();
+    const update = grokSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0];
+    expect(String((update.session as { instructions: string }).instructions)).toMatch(
+      /Espera em silêncio até o destinatário falar/i,
+    );
+  });
 });
+
+function forceMessageCount(grokSend: ReturnType<typeof vi.fn>): number {
+  return grokSend.mock.calls.filter((c) => {
+    const msg = c[0] as { type?: string; item?: { type?: string } };
+    return msg?.type === "conversation.item.create" && msg.item?.type === "force_message";
+  }).length;
+}

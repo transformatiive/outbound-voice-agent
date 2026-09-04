@@ -145,4 +145,89 @@ describe("media stream websocket", () => {
       grokWss.close();
     }
   });
+
+  it("waits for callee speech before speaking the greeting when waitForCallee is true", async () => {
+    const grokWss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const grokPort = await new Promise<number>((resolve) => {
+      grokWss.once("listening", () => resolve((grokWss.address() as AddressInfo).port));
+    });
+
+    const grokFromApp: JsonObject[] = [];
+    const grokConnection = new Promise<WebSocket>((resolve) => {
+      grokWss.once("connection", (ws) => {
+        ws.on("message", (data) => {
+          grokFromApp.push(JSON.parse(String(data)) as JsonObject);
+        });
+        resolve(ws);
+      });
+    });
+
+    const telnyx: TelnyxClient = {
+      dial: vi.fn(async () => ({
+        call_control_id: "v2:control-id",
+        call_leg_id: "leg-id",
+        call_session_id: "session-id",
+        is_alive: false,
+        record_type: "call",
+      })),
+      hangup: vi.fn(async () => undefined),
+    };
+
+    const { app, store, attach } = createApp({
+      config,
+      telnyx,
+      connectGrok: () => new WebSocket(`ws://127.0.0.1:${grokPort}`),
+    });
+    const httpServer = createServer(app);
+    attach(httpServer);
+    const port = await listen(httpServer);
+
+    try {
+      const created = await request(app)
+        .post("/api/outbound")
+        .set("Authorization", "Bearer test-api-key")
+        .send({
+          to: "+351912345678",
+          language: "pt-PT",
+          greeting: "Olá, fala a secretária da Ara.",
+          objective: "Confirmar quinta",
+          waitForCallee: true,
+        });
+      const call = store.get(created.body.id as string);
+      if (!call) throw new Error("call missing");
+      expect(call.waitForCallee).toBe(true);
+
+      const telnyxWs = new WebSocket(
+        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
+      );
+      await new Promise<void>((resolve, reject) => {
+        telnyxWs.once("open", () => resolve());
+        telnyxWs.once("error", reject);
+      });
+
+      const grokWs = await grokConnection;
+      const sessionUpdate = await waitFor(grokFromApp, (m) => m.type === "session.update");
+      expect(String((sessionUpdate.session as JsonObject).instructions)).toMatch(
+        /Espera em silêncio até o destinatário falar/i,
+      );
+
+      grokWs.send(JSON.stringify({ type: "session.updated" }));
+      await new Promise((r) => setTimeout(r, 80));
+      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+
+      grokWs.send(JSON.stringify({ type: "input_audio_buffer.speech_started" }));
+      const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
+      expect((greeting.item as JsonObject).type).toBe("force_message");
+      expect(((greeting.item as JsonObject).content as JsonObject[])[0]).toMatchObject({
+        type: "output_text",
+        text: "Olá, fala a secretária da Ara.",
+      });
+
+      telnyxWs.close();
+      grokWs.close();
+    } finally {
+      httpServer.close();
+      grokWss.close();
+    }
+  });
 });

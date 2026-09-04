@@ -130,6 +130,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       language: result.call.language,
       voice: result.call.voice,
       model: result.call.model,
+      waitForCallee: result.call.waitForCallee === true,
       createdAt: result.call.createdAt,
     });
   });

@@ -24,6 +24,18 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.instructions).toMatch(/português europeu/i);
   });
 
+  it("puts wait-for-callee flow into session instructions when waitForCallee is true", () => {
+    const payload = sessionUpdatePayload({
+      voice: "ara",
+      language: "pt-PT",
+      greeting: "Olá, fala a secretária.",
+      objective: "Confirmar marcação",
+      waitForCallee: true,
+    });
+    expect(payload.session.instructions).toMatch(/Espera em silêncio até o destinatário falar/i);
+    expect(payload.session.instructions).not.toMatch(/já está a ser dita/i);
+  });
+
   it("locks en-GB session instructions and ASR hint", () => {
     const payload = sessionUpdatePayload({
       voice: "ara",
