@@ -199,9 +199,13 @@ describe("media stream websocket", () => {
       if (!call) throw new Error("call missing");
       expect(call.waitForCallee).toBe(true);
 
+      const telnyxFromGrok: JsonObject[] = [];
       const telnyxWs = new WebSocket(
         `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
       );
+      telnyxWs.on("message", (data) => {
+        telnyxFromGrok.push(JSON.parse(String(data)) as JsonObject);
+      });
       await new Promise<void>((resolve, reject) => {
         telnyxWs.once("open", () => resolve());
         telnyxWs.once("error", reject);
@@ -212,10 +216,21 @@ describe("media stream websocket", () => {
       expect(String((sessionUpdate.session as JsonObject).instructions)).toMatch(
         /Espera em silêncio até o destinatário falar/i,
       );
+      expect((sessionUpdate.session as JsonObject).turn_detection).toMatchObject({
+        create_response: false,
+      });
+      expect(
+        ((sessionUpdate.session as JsonObject).turn_detection as JsonObject).idle_timeout_ms,
+      ).toBeUndefined();
 
       grokWs.send(JSON.stringify({ type: "session.updated" }));
+      grokWs.send(JSON.stringify({ type: "response.created", response_id: "auto-1" }));
+      grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "UlRQQQ==" }));
       await new Promise((r) => setTimeout(r, 80));
       expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+      expect(grokFromApp.some((m) => m.type === "response.create")).toBe(false);
+      expect(grokFromApp.some((m) => m.type === "response.cancel")).toBe(true);
+      expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
 
       grokWs.send(JSON.stringify({ type: "input_audio_buffer.speech_started" }));
       const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
@@ -224,6 +239,19 @@ describe("media stream websocket", () => {
         type: "output_text",
         text: "Olá, fala a secretária.",
       });
+      const talkingUpdate = await waitFor(
+        grokFromApp,
+        (m) =>
+          m.type === "session.update" &&
+          ((m.session as JsonObject).turn_detection as JsonObject | undefined)?.create_response === true,
+      );
+      expect((talkingUpdate.session as JsonObject).turn_detection).toMatchObject({
+        create_response: true,
+      });
+
+      grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "UlRQQQ==" }));
+      const media = await waitFor(telnyxFromGrok, (m) => m.event === "media");
+      expect(media).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
 
       telnyxWs.close();
       grokWs.close();

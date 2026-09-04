@@ -175,6 +175,8 @@ describe("media bridge Telnyx ↔ Grok", () => {
       silence_duration_ms: 350,
       prefix_padding_ms: 200,
       idle_timeout_ms: 12_000,
+      create_response: true,
+      interrupt_response: true,
     });
   });
 
@@ -215,6 +217,47 @@ describe("media bridge Telnyx ↔ Grok", () => {
     });
   });
 
+  it("does not invoke speakGreeting on session.updated when waitForCallee is true, then invokes it once after speech_started", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    const spy = vi.spyOn(bridge, "speakGreeting");
+
+    bridge.configureGrokSession();
+    await bridge.onGrokEvent({ type: "session.created" });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "auto-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "QUJDRA==" });
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(responseCreateCount(grokSend)).toBe(0);
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+
+    grokSend.mockClear();
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(responseCreateCount(grokSend)).toBe(0);
+
+    spy.mockClear();
+    grokSend.mockClear();
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Estou",
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(forceMessageCount(grokSend)).toBe(0);
+  });
+
   it("does not speak on session.updated when waitForCallee is true", async () => {
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();
@@ -226,7 +269,46 @@ describe("media bridge Telnyx ↔ Grok", () => {
     });
     await bridge.onGrokEvent({ type: "session.updated" });
     expect(forceMessageCount(grokSend)).toBe(0);
+    expect(responseCreateCount(grokSend)).toBe(0);
     expect(telnyxSend).not.toHaveBeenCalled();
+  });
+
+  it("mutes Grok auto-speech until the callee speaks when waitForCallee is true", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.configureGrokSession();
+    const waitingUpdate = grokSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0];
+    expect(waitingUpdate.session.turn_detection.create_response).toBe(false);
+    expect(waitingUpdate.session.turn_detection.idle_timeout_ms).toBeUndefined();
+
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.created" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      transcript: "Olá, sou a secretária.",
+    });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(bridge.call.transcript).toEqual([]);
+
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    const talkingUpdate = grokSend.mock.calls.filter((c) => c[0]?.type === "session.update").at(-1)?.[0];
+    expect(talkingUpdate.session.turn_detection.create_response).toBe(true);
+    expect(talkingUpdate.session.turn_detection.idle_timeout_ms).toBe(12_000);
+
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    expect(telnyxSend).toHaveBeenCalledWith({
+      event: "media",
+      media: { payload: "UlRQQQ==" },
+    });
   });
 
   it("speaks the greeting once on first callee speech_started when waitForCallee is true", async () => {
@@ -258,27 +340,33 @@ describe("media bridge Telnyx ↔ Grok", () => {
       sendTelnyx: vi.fn(),
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
+    const spy = vi.spyOn(bridge, "speakGreeting");
     await bridge.onGrokEvent({ type: "session.updated" });
+    expect(spy).not.toHaveBeenCalled();
     await bridge.onGrokEvent({
       type: "conversation.item.input_audio_transcription.completed",
       item_id: "u1",
       transcript: "   ",
     });
     expect(forceMessageCount(grokSend)).toBe(0);
+    expect(spy).not.toHaveBeenCalled();
 
     await bridge.onGrokEvent({
       type: "conversation.item.input_audio_transcription.completed",
       item_id: "u2",
       transcript: "Estou",
     });
+    expect(spy).toHaveBeenCalledTimes(1);
     expect(forceMessageCount(grokSend)).toBe(1);
 
+    spy.mockClear();
     grokSend.mockClear();
     await bridge.onGrokEvent({
       type: "conversation.item.input_audio_transcription.updated",
       item_id: "u3",
       transcript: "Estou sim",
     });
+    expect(spy).not.toHaveBeenCalled();
     expect(forceMessageCount(grokSend)).toBe(0);
   });
 
@@ -295,6 +383,9 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(String((update.session as { instructions: string }).instructions)).toMatch(
       /Espera em silêncio até o destinatário falar/i,
     );
+    expect(
+      (update.session as { turn_detection: { create_response: boolean } }).turn_detection.create_response,
+    ).toBe(false);
   });
 });
 
@@ -303,4 +394,8 @@ function forceMessageCount(grokSend: ReturnType<typeof vi.fn>): number {
     const msg = c[0] as { type?: string; item?: { type?: string } };
     return msg?.type === "conversation.item.create" && msg.item?.type === "force_message";
   }).length;
+}
+
+function responseCreateCount(grokSend: ReturnType<typeof vi.fn>): number {
+  return grokSend.mock.calls.filter((c) => (c[0] as { type?: string })?.type === "response.create").length;
 }
