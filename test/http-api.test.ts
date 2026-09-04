@@ -18,6 +18,7 @@ const config: AppConfig = {
   xaiBaseUrl: "https://api.x.ai",
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
+  grokVoiceSpeed: 1,
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,

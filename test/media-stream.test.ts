@@ -22,6 +22,7 @@ const config: AppConfig = {
   xaiBaseUrl: "https://api.x.ai",
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
+  grokVoiceSpeed: 1,
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
@@ -125,6 +126,8 @@ describe("media stream websocket", () => {
       grokWs.send(JSON.stringify({ type: "session.updated" }));
       const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
       expect((greeting.item as JsonObject).type).toBe("force_message");
+      grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
+      grokWs.send(JSON.stringify({ type: "response.done" }));
 
       telnyxWs.send(
         JSON.stringify({
@@ -251,6 +254,8 @@ describe("media stream websocket", () => {
         type: "output_text",
         text: "Olá, fala a secretária.",
       });
+      grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
+      grokWs.send(JSON.stringify({ type: "response.done" }));
       const talkingUpdate = await waitFor(
         grokFromApp,
         (m) =>

@@ -32,17 +32,20 @@ export type TurnDetectionOptions = {
 };
 
 /**
- * Phone-tuned server_vad. silence_duration_ms 220 (was 350) so the agent
- * starts speaking ~0.2s after the callee stops. Override with GROK_VAD_SILENCE_MS.
+ * Phone-tuned server_vad. silence_duration_ms 160 (was 220) so the agent
+ * starts speaking as soon as the callee stops. Override with GROK_VAD_SILENCE_MS.
  * prefix_padding_ms 200 keeps barge-in audio; idle_timeout_ms is hang-idle, not turn gap.
- * create_response is explicit: false while waitForCallee until the greeting is sent.
+ * create_response is explicit: false until the scripted greeting has finished.
  */
 export const DEFAULT_TURN_DETECTION: TurnDetectionSettings = {
   threshold: 0.5,
-  silenceDurationMs: 220,
+  silenceDurationMs: 160,
   prefixPaddingMs: 200,
   idleTimeoutMs: 12_000,
 };
+
+/** Documented xAI session.audio.output.speed range is 0.7–1.5. Default 1.0. */
+export const DEFAULT_OUTPUT_SPEED = 1;
 
 export type GrokSessionUpdate = {
   type: "session.update";
@@ -56,7 +59,7 @@ export type GrokSessionUpdate = {
         format: { type: "audio/pcmu" };
         transcription: { language_hint: string };
       };
-      output: { format: { type: "audio/pcmu" } };
+      output: { format: { type: "audio/pcmu" }; speed: number };
     };
     tools: GrokFunctionTool[];
     tool_choice: "auto";
@@ -68,10 +71,10 @@ export function grokRealtimeUrl(xaiBaseUrl: string, model: string): string {
   const wss = https.startsWith("https://")
     ? `wss://${https.slice("https://".length)}`
     : https.startsWith("http://")
-    ? `ws://${https.slice("http://".length)}`
-    : https.startsWith("wss://") || https.startsWith("ws://")
-      ? https
-      : `wss://${https}`;
+      ? `ws://${https.slice("http://".length)}`
+      : https.startsWith("wss://") || https.startsWith("ws://")
+        ? https
+        : `wss://${https}`;
   return `${wss}/v1/realtime?model=${encodeURIComponent(model)}`;
 }
 
@@ -100,16 +103,22 @@ export function sessionUpdatePayload(input: {
   extraInstructions?: string;
   waitForCallee?: boolean;
   turnDetection?: TurnDetectionSettings;
+  createResponse?: boolean;
+  includeIdleTimeout?: boolean;
+  outputSpeed?: number;
 }): GrokSessionUpdate {
   const waitForCallee = input.waitForCallee === true;
+  const createResponse = input.createResponse ?? !waitForCallee;
+  const includeIdleTimeout = input.includeIdleTimeout ?? !waitForCallee;
+  const outputSpeed = input.outputSpeed ?? DEFAULT_OUTPUT_SPEED;
   return {
     type: "session.update",
     session: {
       voice: input.voice,
       instructions: buildSessionInstructions(input),
       turn_detection: grokTurnDetection(input.turnDetection ?? DEFAULT_TURN_DETECTION, {
-        createResponse: !waitForCallee,
-        includeIdleTimeout: !waitForCallee,
+        createResponse,
+        includeIdleTimeout,
       }),
       reasoning: { effort: "none" },
       audio: {
@@ -117,7 +126,7 @@ export function sessionUpdatePayload(input: {
           format: { type: "audio/pcmu" },
           transcription: { language_hint: languageHint(input.language) },
         },
-        output: { format: { type: "audio/pcmu" } },
+        output: { format: { type: "audio/pcmu" }, speed: outputSpeed },
       },
       tools: [
         {

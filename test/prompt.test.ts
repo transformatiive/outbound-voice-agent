@@ -42,7 +42,11 @@ describe("prompt / language", () => {
     expect(text).not.toMatch(/British English/i);
     expect(text).not.toMatch(/American English/i);
     expect(text).toMatch(/pessoa ao telefone/);
-    expect(text).toMatch(/Responde logo a seguir/);
+    expect(text).toMatch(/Responde no instante/);
+    expect(text).toMatch(/NUNCA inventes factos/);
+    expect(text).toMatch(/número de pessoas/);
+    expect(text).toMatch(/calorosa/);
+    expect(text).toMatch(/exactamente uma vez/);
     assertNoSpokenBranding(text);
   });
 
@@ -65,8 +69,12 @@ describe("prompt / language", () => {
     expect(us).not.toMatch(/português europeu/i);
     expect(gb).toMatch(/end_call/);
     expect(us).toMatch(/end_call/);
-    expect(gb).toMatch(/Answer as soon as the callee finishes/);
-    expect(us).toMatch(/person on the phone/);
+    expect(gb).toMatch(/Answer the instant the callee finishes/);
+    expect(us).toMatch(/person on a live phone call/);
+    expect(gb).toMatch(/NEVER invent facts/);
+    expect(us).toMatch(/headcount/);
+    expect(gb).toMatch(/exactly once/);
+    expect(gb).toMatch(/warm, attentive, natural/);
     assertNoSpokenBranding(gb);
     assertNoSpokenBranding(us);
   });
@@ -97,7 +105,7 @@ describe("prompt / language", () => {
       objective: "Confirmar a marcação",
     });
     expect(text).toMatch(/já está a ser dita/i);
-    expect(text).toMatch(/Saudação já entregue/);
+    expect(text).toMatch(/Saudação já entregue \(uma vez/);
     expect(text).not.toMatch(/Espera em silêncio/);
     assertNoSpokenBranding(text);
   });
@@ -112,9 +120,11 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
     expect(pt).toMatch(/Não fales antes/);
     expect(pt).toMatch(/depois de o destinatário falar/i);
+    expect(pt).toMatch(/exactamente uma vez/);
     expect(pt).toMatch(/Uma pergunta de cada vez/);
+    expect(pt).toMatch(/NUNCA inventes factos/);
     expect(pt).not.toMatch(/já está a ser dita/i);
-    expect(pt).not.toMatch(/Saudação já entregue/);
+    expect(pt).not.toMatch(/Saudação já entregue \(uma vez/);
     assertNoSpokenBranding(pt);
 
     const en = buildSessionInstructions({
@@ -126,9 +136,11 @@ describe("prompt / language", () => {
     expect(en).toMatch(/Wait silently until the callee speaks/i);
     expect(en).toMatch(/Do not speak before that/);
     expect(en).toMatch(/After the greeting/i);
+    expect(en).toMatch(/exactly once/);
     expect(en).toMatch(/One question at a time/);
+    expect(en).toMatch(/NEVER invent facts/);
     expect(en).not.toMatch(/already being spoken/i);
-    expect(en).not.toMatch(/Greeting already delivered/);
+    expect(en).not.toMatch(/Greeting already delivered \(once/);
     assertNoSpokenBranding(en);
   });
 
@@ -159,6 +171,38 @@ describe("prompt / language", () => {
       });
       assertNoSpokenBranding(immediate);
       assertNoSpokenBranding(waiting);
+    }
+  });
+
+  it("hardens greeting-once, phone empathy, instant replies, and no invented facts", () => {
+    const languages: Language[] = ["pt-PT", "en-GB", "en-US"];
+    for (const language of languages) {
+      const text = buildSessionInstructions({
+        language,
+        greeting: defaultGreeting(language),
+        objective: "x",
+        waitForCallee: true,
+      });
+      if (language === "pt-PT") {
+        expect(text).toMatch(/exactamente uma vez/);
+        expect(text).toMatch(/não a parafraseies/i);
+        expect(text).toMatch(/Empatia breve/);
+        expect(text).toMatch(/Responde no instante/);
+        expect(text).toMatch(/NUNCA inventes factos/);
+        expect(text).toMatch(/número de pessoas/);
+        expect(text).toMatch(/preços/);
+        expect(text).toMatch(/pergunta curta/);
+      } else {
+        expect(text).toMatch(/exactly once/);
+        expect(text).toMatch(/paraphrase it/);
+        expect(text).toMatch(/Brief empathy/);
+        expect(text).toMatch(/Answer the instant/);
+        expect(text).toMatch(/NEVER invent facts/);
+        expect(text).toMatch(/headcount/);
+        expect(text).toMatch(/prices/);
+        expect(text).toMatch(/clarifying question/);
+      }
+      assertNoSpokenBranding(text);
     }
   });
 });
