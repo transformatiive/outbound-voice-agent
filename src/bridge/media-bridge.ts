@@ -1,5 +1,6 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
 import {
+  DEFAULT_OUTPUT_SPEED,
   DEFAULT_TURN_DETECTION,
   sessionUpdatePayload,
   type TurnDetectionSettings,
@@ -30,6 +31,7 @@ export type MediaBridgeOptions = {
   model?: string;
   extraInstructions?: string;
   turnDetection?: TurnDetectionSettings;
+  outputSpeed?: number;
   calleeSpeechGraceMs?: number;
   calleeMinSpeechMs?: number;
   onEnded?: (call: CallRecord) => void;
@@ -46,12 +48,16 @@ export class MediaBridge {
   private readonly voice: string;
   private readonly extraInstructions: string | undefined;
   private readonly turnDetection: TurnDetectionSettings;
+  private readonly outputSpeed: number;
   private readonly calleeSpeechConfig: CalleeSpeechGateConfig;
   private readonly calleeGate: CalleeSpeechGate;
   private readonly onEnded: ((call: CallRecord) => void) | undefined;
   private readonly now: () => string;
   private readonly clockMs: () => number;
   private greetingSent = false;
+  private greetingPlaying = false;
+  private suppressUntilNextCalleeSpeech = false;
+  private suppressAssistantAudio = false;
   private hangingUp = false;
   private grokResponsePending = false;
   private readonly pendingUser = new Map<string, string>();
@@ -66,6 +72,7 @@ export class MediaBridge {
     this.voice = opts.voice ?? opts.call.voice;
     this.extraInstructions = opts.extraInstructions ?? opts.call.extraInstructions;
     this.turnDetection = opts.turnDetection ?? DEFAULT_TURN_DETECTION;
+    this.outputSpeed = opts.outputSpeed ?? DEFAULT_OUTPUT_SPEED;
     this.calleeSpeechConfig = {
       graceMs: opts.calleeSpeechGraceMs ?? DEFAULT_CALLEE_SPEECH_GRACE_MS,
       minSpeechMs: opts.calleeMinSpeechMs ?? DEFAULT_CALLEE_MIN_SPEECH_MS,
@@ -78,6 +85,7 @@ export class MediaBridge {
 
   configureGrokSession(): void {
     const waitForCallee = this.isWaitingForCalleeSpeech();
+    const autoRespond = this.greetingSent && !this.greetingPlaying;
     this.sendGrok(
       sessionUpdatePayload({
         voice: this.voice,
@@ -89,6 +97,9 @@ export class MediaBridge {
           : {}),
         ...(waitForCallee ? { waitForCallee: true } : {}),
         turnDetection: this.turnDetection,
+        createResponse: autoRespond,
+        includeIdleTimeout: autoRespond,
+        outputSpeed: this.outputSpeed,
       }) as unknown as JsonObject,
     );
     this.grokConfigured = true;
@@ -99,6 +110,8 @@ export class MediaBridge {
     const wasWaiting = this.call.waitForCallee === true;
     if (wasWaiting) this.cancelPendingGrokResponse();
     this.greetingSent = true;
+    this.greetingPlaying = true;
+    if (wasWaiting) this.suppressUntilNextCalleeSpeech = true;
     if (wasWaiting) this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     this.sendGrok({
@@ -110,8 +123,10 @@ export class MediaBridge {
         content: [{ type: "output_text", text: this.call.greeting }],
       },
     });
-    // Re-enable server_vad auto-response only after the scripted greeting is queued.
-    if (wasWaiting) this.configureGrokSession();
+    this.suppressAssistantAudio = false;
+    // Keep create_response false while the scripted greeting plays so the model
+    // cannot immediately re-introduce itself. Instructions switch to "already delivered".
+    this.configureGrokSession();
   }
 
   onTelnyxMessage(message: JsonObject): void {
@@ -151,11 +166,10 @@ export class MediaBridge {
         if (this.call.waitForCallee !== true) this.speakGreeting();
         return;
       case "response.created":
-        this.grokResponsePending = true;
-        if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse();
+        this.onGrokResponseCreated();
         return;
       case "response.done":
-        this.grokResponsePending = false;
+        this.onGrokResponseDone();
         return;
       case "input_audio_buffer.timeout_triggered":
         if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse(true);
@@ -172,7 +186,8 @@ export class MediaBridge {
           this.logCalleeGate(decision, "speech_started");
           return;
         }
-        this.sendTelnyx({ event: "clear" });
+        if (this.greetingPlaying && this.call.waitForCallee === true) return;
+        this.bargeIn();
         return;
       }
       case "input_audio_buffer.speech_stopped": {
@@ -273,14 +288,53 @@ export class MediaBridge {
     return this.call.waitForCallee === true && !this.greetingSent;
   }
 
+  private onGrokResponseCreated(): void {
+    if (!this.greetingSent) {
+      this.cancelPendingGrokResponse(true);
+      return;
+    }
+    if (this.greetingPlaying) {
+      if (this.grokResponsePending) return;
+      this.grokResponsePending = true;
+      this.suppressAssistantAudio = false;
+      return;
+    }
+    if (this.suppressUntilNextCalleeSpeech) {
+      this.cancelPendingGrokResponse(true);
+      return;
+    }
+    this.grokResponsePending = true;
+    this.suppressAssistantAudio = false;
+  }
+
+  private onGrokResponseDone(): void {
+    this.grokResponsePending = false;
+    if (!this.greetingPlaying) return;
+    this.greetingPlaying = false;
+    this.configureGrokSession();
+  }
+
+  private bargeIn(): void {
+    this.suppressUntilNextCalleeSpeech = false;
+    this.sendTelnyx({ event: "clear" });
+    this.cancelPendingGrokResponse(true);
+    if (this.greetingPlaying) {
+      this.greetingPlaying = false;
+      this.configureGrokSession();
+    }
+  }
+
   private cancelPendingGrokResponse(force = false): void {
     if (!force && !this.grokResponsePending) return;
     this.sendGrok({ type: "response.cancel" });
     this.grokResponsePending = false;
+    this.suppressAssistantAudio = true;
   }
 
   private forwardGrokAudio(event: JsonObject): void {
     if (this.isWaitingForCalleeSpeech()) return;
+    if (!this.greetingSent) return;
+    if (this.suppressAssistantAudio) return;
     const delta =
       typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
     if (typeof delta === "string" && delta.length > 0) {

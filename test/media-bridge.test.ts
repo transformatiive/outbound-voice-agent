@@ -53,7 +53,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     });
   });
 
-  it("forwards Grok audio deltas back to Telnyx as media frames", () => {
+  it("forwards Grok audio deltas back to Telnyx as media frames", async () => {
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();
     const telnyx: TelnyxClient = { dial: vi.fn(), hangup: vi.fn() };
@@ -68,22 +68,23 @@ describe("media bridge Telnyx ↔ Grok", () => {
       stream_id: "stream-1",
       start: { call_control_id: "v2:control-id" },
     });
+    await playGreeting(bridge);
 
-    bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
     expect(telnyxSend).toHaveBeenCalledWith({
       event: "media",
       media: { payload: "UlRQQQ==" },
     });
 
     telnyxSend.mockClear();
-    bridge.onGrokEvent({ type: "response.audio.delta", delta: "UlRQQQ==" });
+    await bridge.onGrokEvent({ type: "response.audio.delta", delta: "UlRQQQ==" });
     expect(telnyxSend).toHaveBeenCalledWith({
       event: "media",
       media: { payload: "UlRQQQ==" },
     });
   });
 
-  it("clears Telnyx playback on barge-in", () => {
+  it("clears Telnyx playback and cancels the in-flight Grok response on barge-in", async () => {
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();
     const telnyx: TelnyxClient = { dial: vi.fn(), hangup: vi.fn() };
@@ -93,8 +94,28 @@ describe("media bridge Telnyx ↔ Grok", () => {
       sendTelnyx: telnyxSend,
       telnyx,
     });
-    bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    await playGreeting(bridge);
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "asst-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    expect(telnyxSend).toHaveBeenCalledWith({
+      event: "media",
+      media: { payload: "UlRQQQ==" },
+    });
+
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "TEZGVQ==" });
+    expect(telnyxSend).not.toHaveBeenCalled();
   });
 
   it("hangs up Telnyx when Grok calls end_call after the greeting/objective flow", async () => {
@@ -167,15 +188,15 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.voice).toBe("ara");
     expect(update.session.audio.input.format).toEqual({ type: "audio/pcmu" });
     expect(update.session.audio.output.format).toEqual({ type: "audio/pcmu" });
+    expect(update.session.audio.output.speed).toBe(1);
     expect(update.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(update.session.tools[0].name).toBe("end_call");
     expect(update.session.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,
-      silence_duration_ms: 220,
+      silence_duration_ms: 160,
       prefix_padding_ms: 200,
-      idle_timeout_ms: 12_000,
-      create_response: true,
+      create_response: false,
       interrupt_response: true,
     });
   });
@@ -199,6 +220,36 @@ describe("media bridge Telnyx ↔ Grok", () => {
       },
     });
     expect(grokSend.mock.calls.some((c) => c[0]?.type === "response.create")).toBe(false);
+  });
+
+  it("does not let the model re-greet after waitForCallee force_message", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Estou",
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(responseCreateCount(grokSend)).toBe(0);
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
+    await finishGreetingPlayback(bridge);
+
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "dup-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "QUJDRA==" });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(responseCreateCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(0);
   });
 
   it("speaks the greeting immediately on session.updated by default", async () => {
@@ -309,16 +360,30 @@ describe("media bridge Telnyx ↔ Grok", () => {
       transcript: "Estou",
     });
     expect(forceMessageCount(grokSend)).toBe(1);
+    const greetingUpdate = grokSend.mock.calls.filter((c) => c[0]?.type === "session.update").at(-1)?.[0];
+    expect(greetingUpdate.session.turn_detection.create_response).toBe(false);
+
+    telnyxSend.mockClear();
+    await finishGreetingPlayback(bridge);
     const talkingUpdate = grokSend.mock.calls.filter((c) => c[0]?.type === "session.update").at(-1)?.[0];
     expect(talkingUpdate.session.turn_detection.create_response).toBe(true);
     expect(talkingUpdate.session.turn_detection.idle_timeout_ms).toBe(12_000);
 
+    grokSend.mockClear();
     telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "re-greet" });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
     await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
     expect(telnyxSend).toHaveBeenCalledWith({
       event: "media",
       media: { payload: "UlRQQQ==" },
     });
+    expect(grokSend.mock.calls.some((c) => (c[0] as { type?: string }).type === "response.cancel")).toBe(false);
   });
 
   it("ignores early speech_started during grace and empty transcripts when waitForCallee is true", async () => {
@@ -391,11 +456,13 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(forceMessageCount(grokSend)).toBe(1);
     expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
 
+    await finishGreetingPlayback(bridge);
     grokSend.mockClear();
     telnyxSend.mockClear();
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(forceMessageCount(grokSend)).toBe(0);
     expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
   });
 
   it("speaks the greeting once on first non-empty user transcription when waitForCallee is true", async () => {
@@ -469,4 +536,15 @@ function forceMessageCount(grokSend: ReturnType<typeof vi.fn>): number {
 
 function responseCreateCount(grokSend: ReturnType<typeof vi.fn>): number {
   return grokSend.mock.calls.filter((c) => (c[0] as { type?: string })?.type === "response.create").length;
+}
+
+async function playGreeting(bridge: MediaBridge): Promise<void> {
+  bridge.speakGreeting();
+  await finishGreetingPlayback(bridge);
+}
+
+async function finishGreetingPlayback(bridge: MediaBridge): Promise<void> {
+  await bridge.onGrokEvent({ type: "response.created", response_id: "greeting" });
+  await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "R1JFVQ==" });
+  await bridge.onGrokEvent({ type: "response.done" });
 }

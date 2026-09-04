@@ -1,4 +1,8 @@
-import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "./grok/session.js";
+import {
+  DEFAULT_OUTPUT_SPEED,
+  DEFAULT_TURN_DETECTION,
+  type TurnDetectionSettings,
+} from "./grok/session.js";
 import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
@@ -24,6 +28,7 @@ export type AppConfig = {
   xaiBaseUrl: string;
   grokVoice: string;
   grokModel: string;
+  grokVoiceSpeed: number;
   turnDetection: TurnDetectionSettings;
   calleeSpeechGraceMs: number;
   calleeMinSpeechMs: number;
@@ -68,6 +73,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const fromNumber = env.FROM_NUMBER?.trim() || "+351210210260";
   const grokVoice = env.GROK_VOICE?.trim() || "ara";
   const grokModel = env.GROK_MODEL?.trim() || "grok-voice-think-fast-2.0";
+  const grokVoiceSpeed =
+    Math.round(envNumber(env, "GROK_VOICE_SPEED", DEFAULT_OUTPUT_SPEED, 0.7, 1.5) * 100) / 100;
   const turnDetection: TurnDetectionSettings = {
     threshold: envNumber(env, "GROK_VAD_THRESHOLD", DEFAULT_TURN_DETECTION.threshold, 0.1, 0.9),
     silenceDurationMs: Math.round(
@@ -129,6 +136,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     xaiBaseUrl,
     grokVoice,
     grokModel,
+    grokVoiceSpeed,
     turnDetection,
     calleeSpeechGraceMs,
     calleeMinSpeechMs,

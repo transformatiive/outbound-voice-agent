@@ -19,6 +19,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.voice).toBe("ara");
     expect(payload.session.audio.input.format.type).toBe("audio/pcmu");
     expect(payload.session.audio.output.format.type).toBe("audio/pcmu");
+    expect(payload.session.audio.output.speed).toBe(1);
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(payload.session.instructions).toMatch(/português europeu/i);
@@ -27,7 +28,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,
-      silence_duration_ms: 220,
+      silence_duration_ms: 160,
       prefix_padding_ms: 200,
       idle_timeout_ms: 12_000,
       create_response: true,
@@ -45,6 +46,8 @@ describe("Grok Voice Live 2 session", () => {
       waitForCallee: true,
     });
     expect(payload.session.instructions).toMatch(/Espera em silêncio até o destinatário falar/i);
+    expect(payload.session.instructions).toMatch(/NUNCA inventes factos/);
+    expect(payload.session.instructions).toMatch(/exactamente uma vez/);
     expect(payload.session.instructions).not.toMatch(/já está a ser dita/i);
     expect(payload.session.turn_detection.create_response).toBe(false);
     expect(payload.session.turn_detection.idle_timeout_ms).toBeUndefined();
@@ -80,5 +83,20 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.turn_detection.silence_duration_ms).toBe(300);
     expect(payload.session.turn_detection.threshold).toBe(0.6);
     expect(payload.session.turn_detection.prefix_padding_ms).toBe(180);
+  });
+
+  it("keeps voice ara and wires documented audio.output.speed", () => {
+    const payload = sessionUpdatePayload({
+      voice: "ara",
+      language: "pt-PT",
+      greeting: "Olá.",
+      objective: "x",
+      outputSpeed: 1.05,
+      createResponse: false,
+    });
+    expect(payload.session.voice).toBe("ara");
+    expect(payload.session.audio.output.speed).toBe(1.05);
+    expect(payload.session.turn_detection.create_response).toBe(false);
+    expect(payload.session.turn_detection.interrupt_response).toBe(true);
   });
 });
