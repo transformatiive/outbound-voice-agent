@@ -19,7 +19,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.voice).toBe("ara");
     expect(payload.session.audio.input.format.type).toBe("audio/pcmu");
     expect(payload.session.audio.output.format.type).toBe("audio/pcmu");
-    expect(payload.session.audio.output.speed).toBe(1);
+    expect(payload.session.audio.output.speed).toBe(1.05);
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(payload.session.instructions).toMatch(/português europeu/i);

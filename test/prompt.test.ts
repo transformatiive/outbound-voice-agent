@@ -174,6 +174,42 @@ describe("prompt / language", () => {
     }
   });
 
+  it("tells the model to go straight to the objective after the greeting", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Fala a secretária. Confirmar a marcação.",
+      objective: "Confirmar a marcação",
+      waitForCallee: true,
+      timezone: "Europe/Lisbon",
+      timeGreeting: "Boa tarde",
+    });
+    expect(pt).toMatch(/vai direto ao objetivo/i);
+    expect(pt).toMatch(/primeira pergunta curta/);
+    expect(pt).toMatch(/Não alongues o nome/);
+    expect(pt).toMatch(/Hora local \(Europe\/Lisbon\)/);
+    expect(pt).toMatch(/boa tarde/i);
+    expect(pt).toMatch(/tom plano|não plana|expressiva/i);
+    expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good morning. This is the secretary. Confirm Thursday.",
+      objective: "Confirm Thursday",
+      waitForCallee: true,
+      timezone: "Europe/Lisbon",
+      timeGreeting: "Good morning",
+    });
+    expect(en).toMatch(/go straight to the objective/i);
+    expect(en).toMatch(/short first (ask|question)/i);
+    expect(en).toMatch(/Do not linger on (the )?(name|title)/i);
+    expect(en).toMatch(/Local time \(Europe\/Lisbon\)/);
+    expect(en).toMatch(/good morning/i);
+    expect(en).toMatch(/not flat|expressive/i);
+    expect(en).toMatch(/Wait silently until the callee speaks/i);
+    assertNoSpokenBranding(en);
+  });
+
   it("hardens greeting-once, phone empathy, instant replies, and no invented facts", () => {
     const languages: Language[] = ["pt-PT", "en-GB", "en-US"];
     for (const language of languages) {

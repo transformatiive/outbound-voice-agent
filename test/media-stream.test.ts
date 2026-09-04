@@ -252,8 +252,9 @@ describe("media stream websocket", () => {
       expect((greeting.item as JsonObject).type).toBe("force_message");
       expect(((greeting.item as JsonObject).content as JsonObject[])[0]).toMatchObject({
         type: "output_text",
-        text: "Olá, fala a secretária.",
+        text: call.greeting,
       });
+      expect(call.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária\. Confirmar quinta\.$/);
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
       grokWs.send(JSON.stringify({ type: "response.done" }));
       const talkingUpdate = await waitFor(

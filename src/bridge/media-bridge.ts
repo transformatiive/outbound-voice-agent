@@ -96,6 +96,7 @@ export class MediaBridge {
           ? { extraInstructions: this.extraInstructions }
           : {}),
         ...(waitForCallee ? { waitForCallee: true } : {}),
+        ...(this.call.timezone ? { timezone: this.call.timezone } : {}),
         turnDetection: this.turnDetection,
         createResponse: autoRespond,
         includeIdleTimeout: autoRespond,

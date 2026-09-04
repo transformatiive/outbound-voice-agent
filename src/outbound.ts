@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
-import { defaultGreeting, instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
+import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./greeting.js";
+import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -16,11 +17,19 @@ export type OutboundBody = {
   metadata?: unknown;
   maxDurationSeconds?: unknown;
   waitForCallee?: unknown;
+  timezone?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
 
-export function parseOutboundBody(body: OutboundBody): 
+export type ParseOutboundOptions = {
+  now?: Date;
+};
+
+export function parseOutboundBody(
+  body: OutboundBody,
+  opts: ParseOutboundOptions = {},
+):
   | {
       ok: true;
       value: {
@@ -32,6 +41,7 @@ export function parseOutboundBody(body: OutboundBody):
         metadata?: Record<string, unknown>;
         maxDurationSeconds?: number;
         waitForCallee: boolean;
+        timezone: string;
       };
     }
   | { ok: false; error: OutboundError } {
@@ -60,20 +70,29 @@ export function parseOutboundBody(body: OutboundBody):
   if (body.waitForCallee !== undefined && body.waitForCallee !== null && typeof body.waitForCallee !== "boolean") {
     return { ok: false, error: { status: 400, error: "invalid_waitForCallee" } };
   }
+  let timezone = DEFAULT_TIMEZONE;
+  if (body.timezone !== undefined && body.timezone !== null && body.timezone !== "") {
+    if (typeof body.timezone !== "string" || !isValidTimeZone(body.timezone.trim())) {
+      return {
+        ok: false,
+        error: {
+          status: 400,
+          error: "invalid_timezone",
+          details: "IANA timezone required, e.g. Europe/Lisbon",
+        },
+      };
+    }
+    timezone = body.timezone.trim();
+  }
   const waitForCallee =
     body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
-  // Persona comes from the request. waitForCallee still needs that greeting after the callee speaks.
-  if (waitForCallee && !greetingRaw) {
-    return {
-      ok: false,
-      error: {
-        status: 400,
-        error: "invalid_greeting",
-        details: "greeting is required when waitForCallee is true; pass the persona greeting",
-      },
-    };
-  }
-  const greeting = greetingRaw || defaultGreeting(language);
+  const greeting = composeSpokenGreeting({
+    language,
+    ...(greetingRaw ? { greeting: greetingRaw } : {}),
+    objective,
+    timezone,
+    now: opts.now ?? new Date(),
+  });
   const metadata =
     body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
       ? (body.metadata as Record<string, unknown>)
@@ -90,6 +109,7 @@ export function parseOutboundBody(body: OutboundBody):
       greeting,
       objective,
       waitForCallee,
+      timezone,
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
@@ -120,6 +140,7 @@ export async function placeOutboundCall(opts: {
     greeting: parsed.value.greeting,
     objective: parsed.value.objective,
     ...(parsed.value.waitForCallee ? { waitForCallee: true } : {}),
+    timezone: parsed.value.timezone,
     voice: opts.config.grokVoice,
     model: opts.config.grokModel,
     streamToken,
