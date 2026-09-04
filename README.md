@@ -4,6 +4,8 @@ Outbound-only **Grok Voice Live 2** agent over **Telnyx Call Control** (Alfasegu
 
 Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. Languages: **`pt-PT` | `en-GB` | `en-US`** (default `pt-PT`). Not Alice.
 
+Set `waitForCallee: true` on `POST /api/outbound` to stay silent until the callee speaks (e.g. «Estou»), then deliver the greeting, then pursue the objective. Default remains immediate greeting.
+
 Tests never place real phone calls.
 
 ## Telnyx (TRNSF)
@@ -22,7 +24,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 1. `POST /api/outbound` → Telnyx `POST /v2/calls` with bidirectional media streaming.
 2. Telnyx connects to `wss://…/media-stream`.
 3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2, voice `ara`).
-4. Greeting is spoken verbatim (`force_message`), then the model works the objective in the requested language (`pt-PT`, `en-GB`, or `en-US`).
+4. Greeting is spoken verbatim (`force_message`), then the model works the objective in the requested language (`pt-PT`, `en-GB`, or `en-US`). With `waitForCallee: true`, the greeting waits until the callee speaks first.
 5. The model calls `end_call` → Telnyx hangup.
 6. Optional `RESULT_WEBHOOK` receives the transcript and outcome.
 
@@ -40,6 +42,8 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 `language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `greeting` is optional; if omitted, a language-specific default is spoken.
 
+`waitForCallee` is optional (default `false`). When `true`, the agent does not speak on `session.updated`; it waits for first callee speech (`input_audio_buffer.speech_started` or a non-empty user transcription), then speaks the greeting once. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request.
+
 - `pt-PT` — European Portuguese (never Brazilian). Default greeting: `Olá, fala a Ara. Esta chamada é gravada.`
 - `en-GB` — natural British English. Default greeting: `Hello, this is Ara. This call is being recorded.`
 - `en-US` — natural American English. Default greeting: `Hi, this is Ara. This call is being recorded.`
@@ -51,6 +55,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
   "greeting": "Olá, fala a Ara da Alfaseguros. Esta chamada é gravada.",
   "objective": "Confirmar a marcação de quinta-feira às 16h.",
   "instructions": "optional extra prompt rules",
+  "waitForCallee": true,
   "metadata": { "ticketId": "abc" },
   "maxDurationSeconds": 300
 }

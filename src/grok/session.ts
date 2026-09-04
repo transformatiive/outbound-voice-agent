@@ -50,6 +50,7 @@ export function sessionUpdatePayload(input: {
   greeting: string;
   objective: string;
   extraInstructions?: string;
+  waitForCallee?: boolean;
 }): GrokSessionUpdate {
   return {
     type: "session.update",

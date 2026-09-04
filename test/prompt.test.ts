@@ -3,6 +3,7 @@ import {
   LANGUAGES,
   buildSessionInstructions,
   defaultGreeting,
+  instructionsRequestWait,
   languageHint,
   isLanguage,
 } from "../src/prompt.js";
@@ -65,5 +66,55 @@ describe("prompt / language", () => {
     expect(defaultGreeting("en-US")).toMatch(/^Hi,/);
     expect(defaultGreeting("en-GB")).toMatch(/recorded/i);
     expect(defaultGreeting("en-US")).toMatch(/recorded/i);
+  });
+
+  it("immediate greeting flow tells the model the greeting is already being spoken", () => {
+    const text = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: defaultGreeting("pt-PT"),
+      objective: "Confirmar a marcação",
+    });
+    expect(text).toMatch(/já está a ser dita/i);
+    expect(text).toMatch(/Saudação já entregue/);
+    expect(text).not.toMatch(/Espera em silêncio/);
+  });
+
+  it("waitForCallee flow tells the model to stay silent until the callee speaks", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, fala a secretária da Ara.",
+      objective: "Confirmar a marcação",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
+    expect(pt).toMatch(/Não fales antes/);
+    expect(pt).toMatch(/depois de o destinatário falar/i);
+    expect(pt).toMatch(/Uma pergunta de cada vez/);
+    expect(pt).not.toMatch(/já está a ser dita/i);
+    expect(pt).not.toMatch(/Saudação já entregue/);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, this is the secretary.",
+      objective: "Confirm Thursday",
+      waitForCallee: true,
+    });
+    expect(en).toMatch(/Wait silently until the callee speaks/i);
+    expect(en).toMatch(/Do not speak before that/);
+    expect(en).toMatch(/After the greeting/i);
+    expect(en).toMatch(/One question at a time/);
+    expect(en).not.toMatch(/already being spoken/i);
+    expect(en).not.toMatch(/Greeting already delivered/);
+  });
+
+  it("detects wait-until-callee-speaks intent in extra instructions", () => {
+    expect(instructionsRequestWait(undefined)).toBe(false);
+    expect(instructionsRequestWait("One question at a time.")).toBe(false);
+    expect(instructionsRequestWait("Wait silently until the callee speaks.")).toBe(true);
+    expect(instructionsRequestWait("Do not speak until the callee answers.")).toBe(true);
+    expect(
+      instructionsRequestWait("Espera em silêncio até o destinatário falar, por exemplo Estou."),
+    ).toBe(true);
+    expect(instructionsRequestWait("Não fales até a pessoa falar.")).toBe(true);
   });
 });

@@ -186,6 +186,71 @@ describe("HTTP API", () => {
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
     expect(got.body.greeting).toBe("Olá, fala a Ara.");
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
+    expect(got.body.waitForCallee).toBe(false);
+    expect(res.body.waitForCallee).toBe(false);
+  });
+
+  it("stores waitForCallee true and infers it from wait instructions", async () => {
+    const { app, store } = createApp({ config, telnyx });
+    const explicit = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        greeting: "Olá, fala a secretária da Ara.",
+        objective: "Confirmar a marcação",
+        waitForCallee: true,
+      });
+    expect(explicit.status).toBe(201);
+    expect(explicit.body.waitForCallee).toBe(true);
+    const stored = store.get(explicit.body.id as string);
+    expect(stored?.waitForCallee).toBe(true);
+
+    const got = await request(app)
+      .get(`/api/calls/${explicit.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.status).toBe(200);
+    expect(got.body.waitForCallee).toBe(true);
+
+    const inferred = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345679",
+        language: "pt-PT",
+        greeting: "Olá, fala a secretária da Ara.",
+        objective: "Confirmar a marcação",
+        instructions: "Wait silently until the callee speaks, then introduce yourself.",
+      });
+    expect(inferred.status).toBe(201);
+    expect(inferred.body.waitForCallee).toBe(true);
+
+    const omitted = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345680",
+        language: "pt-PT",
+        greeting: "Olá",
+        objective: "Confirmar",
+      });
+    expect(omitted.status).toBe(201);
+    expect(omitted.body.waitForCallee).toBe(false);
+
+    const bad = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345681",
+        language: "pt-PT",
+        greeting: "Olá",
+        objective: "Confirmar",
+        waitForCallee: "yes",
+      });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe("invalid_waitForCallee");
+    expect(telnyx.dial).toHaveBeenCalledTimes(3);
   });
 
   it("GET /api/calls/:id requires auth and 404s unknown ids", async () => {

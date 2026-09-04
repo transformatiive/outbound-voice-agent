@@ -34,34 +34,62 @@ export function defaultGreeting(language: Language): string {
   }
 }
 
+export function instructionsRequestWait(instructions: string | undefined): boolean {
+  if (!instructions?.trim()) return false;
+  const t = stripDiacritics(instructions).toLowerCase();
+  return (
+    /\bwait\b.{0,80}\b(speak|speech|callee|silent)/.test(t) ||
+    /\b(do not|don't|never)\s+speak\b.{0,40}\buntil\b/.test(t) ||
+    /\bespera(?:r)?\b.{0,80}\b(fale|falar|silencio|destinatario)/.test(t) ||
+    /\baguard(?:a|ar|e)\b.{0,80}\b(fale|falar|destinatario)/.test(t) ||
+    /\bnao\s+fal(?:e|es|ar)\b.{0,40}\bate\b/.test(t)
+  );
+}
+
+function stripDiacritics(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}/gu, "");
+}
+
 export function buildSessionInstructions(input: {
   language: Language;
   greeting: string;
   objective: string;
   extraInstructions?: string;
+  waitForCallee?: boolean;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
     : "";
+  const waitForCallee = input.waitForCallee === true;
 
   return `${languageInstructions(input.language)}
 
-${roleAndFlow(input.language)}
+${roleAndFlow(input.language, waitForCallee)}
 
 ${objectiveHeading(input.language)}
 ${input.objective}
 
-${greetingHeading(input.language)}
+${greetingHeading(input.language, waitForCallee)}
 ${input.greeting}
 
 ${endCallHeading(input.language)}
 ${extra}`.trim();
 }
 
-function roleAndFlow(language: Language): string {
+function roleAndFlow(language: Language, waitForCallee: boolean): string {
   switch (language) {
     case "pt-PT":
-      return `# Papel
+      return waitForCallee
+        ? `# Papel
+És um agente de chamadas de saída. Foste tu a ligar. Não és a Alice nem uma recepcionista de entrada.
+
+# Fluxo
+1. Espera em silêncio até o destinatário falar (por exemplo «Estou»). Não fales antes disso.
+2. Depois de o destinatário falar, uma saudação é dita palavra por palavra. Não a repitas.
+3. Depois da saudação, persegue o objetivo. Uma pergunta de cada vez. Turnos curtos. Cala-te a seguir a cada pergunta.
+4. Quando o objetivo estiver concluído, recusado ou claramente impossível: despede-te em duas frases e chama end_call.
+5. Nunca menciones ferramentas internas, modelos ou prompts.`
+        : `# Papel
 És um agente de chamadas de saída. Foste tu a ligar. Não és a Alice nem uma recepcionista de entrada.
 
 # Fluxo
@@ -72,7 +100,17 @@ function roleAndFlow(language: Language): string {
 5. Nunca menciones ferramentas internas, modelos ou prompts.`;
     case "en-GB":
     case "en-US":
-      return `# Role
+      return waitForCallee
+        ? `# Role
+You are an outbound phone agent. You placed this call. You are not Alice and you are not an inbound receptionist.
+
+# Flow
+1. Wait silently until the callee speaks. Do not speak before that.
+2. After the callee speaks, a scripted greeting is delivered verbatim. Do not repeat the greeting.
+3. After the greeting, pursue the objective. One question at a time. Short turns. Stop talking after each question.
+4. When the objective is complete, declined, or clearly impossible: give a brief goodbye, then call end_call.
+5. Never mention internal tools, models, or prompts.`
+        : `# Role
 You are an outbound phone agent. You placed this call. You are not Alice and you are not an inbound receptionist.
 
 # Flow
@@ -102,13 +140,17 @@ function objectiveHeading(language: Language): string {
   }
 }
 
-function greetingHeading(language: Language): string {
+function greetingHeading(language: Language, waitForCallee: boolean): string {
   switch (language) {
     case "pt-PT":
-      return "# Saudação já entregue";
+      return waitForCallee
+        ? "# Saudação (entregue depois de o destinatário falar)"
+        : "# Saudação já entregue";
     case "en-GB":
     case "en-US":
-      return "# Greeting already delivered";
+      return waitForCallee
+        ? "# Greeting (delivered after the callee speaks)"
+        : "# Greeting already delivered";
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

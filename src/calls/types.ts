@@ -23,6 +23,7 @@ export type CallRecord = {
   language: Language;
   greeting: string;
   objective: string;
+  waitForCallee?: boolean;
   extraInstructions?: string;
   metadata?: Record<string, unknown>;
   voice: string;
@@ -49,6 +50,7 @@ export type PublicCall = {
   language: Language;
   greeting: string;
   objective: string;
+  waitForCallee: boolean;
   voice: string;
   model: string;
   telnyx: {
@@ -73,6 +75,7 @@ export function toPublicCall(call: CallRecord): PublicCall {
     language: call.language,
     greeting: call.greeting,
     objective: call.objective,
+    waitForCallee: call.waitForCallee === true,
     voice: call.voice,
     model: call.model,
     telnyx: { ...call.telnyx },

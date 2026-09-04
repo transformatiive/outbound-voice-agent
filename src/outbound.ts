@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
-import { defaultGreeting, isLanguage, type Language } from "./prompt.js";
+import { defaultGreeting, instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -15,6 +15,7 @@ export type OutboundBody = {
   instructions?: unknown;
   metadata?: unknown;
   maxDurationSeconds?: unknown;
+  waitForCallee?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
@@ -30,6 +31,7 @@ export function parseOutboundBody(body: OutboundBody):
         extraInstructions?: string;
         metadata?: Record<string, unknown>;
         maxDurationSeconds?: number;
+        waitForCallee: boolean;
       };
     }
   | { ok: false; error: OutboundError } {
@@ -56,6 +58,11 @@ export function parseOutboundBody(body: OutboundBody):
     return { ok: false, error: { status: 400, error: "invalid_objective" } };
   }
   const extra = typeof body.instructions === "string" ? body.instructions.trim() : "";
+  if (body.waitForCallee !== undefined && body.waitForCallee !== null && typeof body.waitForCallee !== "boolean") {
+    return { ok: false, error: { status: 400, error: "invalid_waitForCallee" } };
+  }
+  const waitForCallee =
+    body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
   const metadata =
     body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
       ? (body.metadata as Record<string, unknown>)
@@ -71,6 +78,7 @@ export function parseOutboundBody(body: OutboundBody):
       language,
       greeting,
       objective,
+      waitForCallee,
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
@@ -100,6 +108,7 @@ export async function placeOutboundCall(opts: {
     language: parsed.value.language,
     greeting: parsed.value.greeting,
     objective: parsed.value.objective,
+    ...(parsed.value.waitForCallee ? { waitForCallee: true } : {}),
     voice: opts.config.grokVoice,
     model: opts.config.grokModel,
     streamToken,
