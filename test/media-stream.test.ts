@@ -393,7 +393,7 @@ describe("media stream websocket", () => {
       });
       expect(elCalls[0]?.url).toContain("NkpT2jezTenCDRKHkWiX");
       expect(elCalls[0]?.url).toContain("output_format=ulaw_8000");
-      expect(elCalls[0]?.url).toContain("optimize_streaming_latency=3");
+      expect(elCalls[0]?.url).not.toContain("optimize_streaming_latency");
       expect(elCalls[0]?.body).toContain(call.greeting);
 
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));

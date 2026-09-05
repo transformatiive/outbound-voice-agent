@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GreetingAudioCache } from "../src/bridge/greeting-audio-cache.js";
 import type { ElevenLabsTts } from "../src/elevenlabs.js";
 
@@ -106,5 +106,29 @@ describe("GreetingAudioCache", () => {
     await flushMicrotasks();
     expect(abortSeen).toBe(true);
     expect(entry.frames).toEqual([FRAME_A]);
+  });
+
+  it("marks the entry failed when TTS throws so unlock can retry", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const tts: ElevenLabsTts = {
+      async *speakToPcmu() {
+        throw new Error(
+          "elevenlabs_tts_failed: HTTP 400 unsupported_model Providing optimize_streaming_latency is not supported with the 'eleven_v3' model.",
+        );
+      },
+    };
+    const cache = new GreetingAudioCache();
+    const entry = cache.startIfNeeded({
+      callId: "call-1",
+      text: "Olá.",
+      language: "pt-PT",
+      tts,
+    });
+    await entry.waitForIndex(0);
+    expect(entry.failed).toBe(true);
+    expect(entry.frames).toEqual([]);
+    expect(entry.done).toBe(true);
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("greeting prefetch failed"))).toBe(true);
+    spy.mockRestore();
   });
 });

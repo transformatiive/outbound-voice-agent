@@ -5,10 +5,16 @@ import {
   consumeSourceToPcmu,
   createElevenLabsTts,
   elevenLabsLanguageCode,
+  elevenLabsOptimizeLatencyRejected,
+  elevenLabsStreamUrl,
   linearToMulaw,
   streamElevenLabsPcmu,
 } from "../src/elevenlabs.js";
-import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID } from "../src/tts.js";
+import {
+  DEFAULT_ELEVENLABS_MODEL,
+  DEFAULT_ELEVENLABS_VOICE_ID,
+  elevenLabsModelSupportsOptimizeStreamingLatency,
+} from "../src/tts.js";
 
 function pcm16(samples: number[]): Buffer {
   const buf = Buffer.alloc(samples.length * 2);
@@ -61,8 +67,9 @@ describe("ElevenLabs HTTP TTS", () => {
     const payload = Buffer.alloc(160, 0x7f);
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       expect(String(url)).toBe(
-        `${ELEVENLABS_API_BASE}/v1/text-to-speech/${DEFAULT_ELEVENLABS_VOICE_ID}/stream?output_format=ulaw_8000&optimize_streaming_latency=3`,
+        `${ELEVENLABS_API_BASE}/v1/text-to-speech/${DEFAULT_ELEVENLABS_VOICE_ID}/stream?output_format=ulaw_8000`,
       );
+      expect(String(url)).not.toContain("optimize_streaming_latency");
       expect((init?.headers as Record<string, string>)["xi-api-key"]).toBe("el-key");
       const body = JSON.parse(String(init?.body));
       expect(body).toEqual({
@@ -70,6 +77,7 @@ describe("ElevenLabs HTTP TTS", () => {
         model_id: DEFAULT_ELEVENLABS_MODEL,
         language_code: "pt",
       });
+      expect(body).not.toHaveProperty("optimize_streaming_latency");
       return new Response(payload, { status: 200 });
     });
     const frames: string[] = [];
@@ -118,6 +126,9 @@ describe("ElevenLabs HTTP TTS", () => {
     }
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(Buffer.from(frames.join(""), "base64").length).toBe(160);
+    for (const call of fetchImpl.mock.calls) {
+      expect(String(call[0])).not.toContain("optimize_streaming_latency");
+    }
   });
 
   it("emits a Telnyx frame as soon as the first ulaw bytes arrive", () => {
@@ -216,5 +227,135 @@ describe("ElevenLabs HTTP TTS", () => {
       frames.push(frame);
     }
     expect(frames).toEqual([payload.toString("base64")]);
+  });
+
+  it("omits optimize_streaming_latency for eleven_v3 even when the env default is 3", async () => {
+    const payload = Buffer.alloc(160, 0x7f);
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      expect(String(url)).not.toContain("optimize_streaming_latency");
+      expect(JSON.parse(String(init?.body))).not.toHaveProperty("optimize_streaming_latency");
+      return new Response(payload, { status: 200 });
+    });
+    const frames: string[] = [];
+    for await (const frame of streamElevenLabsPcmu({
+      config: {
+        apiKey: "el-key",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+        model: "eleven_v3",
+        configured: true,
+        optimizeStreamingLatency: 3,
+      },
+      text: "Olá.",
+      language: "pt-PT",
+      signal: new AbortController().signal,
+      fetchImpl,
+    })) {
+      frames.push(frame);
+    }
+    expect(frames).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends optimize_streaming_latency=3 for flash, turbo, and multilingual_v2", async () => {
+    const payload = Buffer.alloc(160, 0x7f);
+    for (const model of ["eleven_flash_v2_5", "eleven_turbo_v2_5", "multilingual_v2"] as const) {
+      const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+        expect(String(url)).toContain("optimize_streaming_latency=3");
+        expect(JSON.parse(String(init?.body))).not.toHaveProperty("optimize_streaming_latency");
+        return new Response(payload, { status: 200 });
+      });
+      for await (const _frame of streamElevenLabsPcmu({
+        config: {
+          apiKey: "el-key",
+          voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+          model,
+          configured: true,
+          optimizeStreamingLatency: 3,
+        },
+        text: "Hello.",
+        language: "en-GB",
+        signal: new AbortController().signal,
+        fetchImpl,
+      })) {
+        /* drain */
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("retries the same format without optimize_streaming_latency after unsupported_model 400", async () => {
+    const payload = Buffer.alloc(160, 0x7f);
+    const rejectBody = JSON.stringify({
+      detail: {
+        status: "unsupported_model",
+        message: "Providing optimize_streaming_latency is not supported with the 'eleven_v3' model.",
+      },
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      const u = String(url);
+      if (u.includes("optimize_streaming_latency")) {
+        expect(u).toContain("output_format=ulaw_8000");
+        return new Response(rejectBody, { status: 400 });
+      }
+      expect(u).not.toContain("optimize_streaming_latency");
+      expect(u).toContain("output_format=ulaw_8000");
+      return new Response(payload, { status: 200 });
+    });
+    const tts = createElevenLabsTts(
+      {
+        apiKey: "el-key",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+        model: "eleven_flash_v2_5",
+        configured: true,
+        optimizeStreamingLatency: 3,
+      },
+      fetchImpl,
+    );
+    async function speakOnce(): Promise<string[]> {
+      const frames: string[] = [];
+      for await (const frame of tts.speakToPcmu({
+        text: "Olá.",
+        language: "pt-PT",
+        signal: new AbortController().signal,
+      })) {
+        frames.push(frame);
+      }
+      return frames;
+    }
+    const first = await speakOnce();
+    expect(first).toEqual([payload.toString("base64")]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("optimize_streaming_latency=3");
+    expect(String(fetchImpl.mock.calls[1]?.[0])).not.toContain("optimize_streaming_latency");
+
+    fetchImpl.mockClear();
+    const second = await speakOnce();
+    expect(second).toEqual([payload.toString("base64")]);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).not.toContain("optimize_streaming_latency");
+  });
+
+  it("classifies the live eleven_v3 400 as an optimize-latency rejection", () => {
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_flash_v2_5")).toBe(true);
+    expect(
+      elevenLabsOptimizeLatencyRejected(
+        400,
+        `unsupported_model Providing optimize_streaming_latency is not supported with the 'eleven_v3' model.`,
+      ),
+    ).toBe(true);
+    expect(
+      elevenLabsStreamUrl(
+        {
+          apiKey: "el-key",
+          voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+          model: "eleven_v3",
+          configured: true,
+          optimizeStreamingLatency: 3,
+        },
+        "ulaw_8000",
+        false,
+      ),
+    ).not.toContain("optimize_streaming_latency");
   });
 });

@@ -1113,6 +1113,68 @@ describe("media bridge ElevenLabs TTS playback", () => {
     spyLog.mockRestore();
   });
 
+  it("retries ElevenLabs TTS on unlock when greeting prefetch failed with an empty cache", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const spyWarn = vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const spyErr = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    let calls = 0;
+    const tts: ElevenLabsTts = {
+      async *speakToPcmu(input) {
+        calls += 1;
+        if (calls === 1) {
+          throw new Error(
+            "elevenlabs_tts_failed: HTTP 400 unsupported_model Providing optimize_streaming_latency is not supported with the 'eleven_v3' model.",
+          );
+        }
+        input.onHttpStart?.();
+        input.onFirstByte?.();
+        yield EL_PCMU;
+      },
+    };
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...elCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: tts,
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    await flushMicrotasks();
+    expect(calls).toBe(1);
+    expect(telnyxSend.mock.calls.some((c) => (c[0] as { event?: string }).event === "media")).toBe(
+      false,
+    );
+
+    clock.ms = 2122;
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Estou",
+    });
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+
+    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+    expect(logs.some((line) => /cache_frames=0/.test(line))).toBe(true);
+    expect(logs.some((line) => /cache_failed=true/.test(line))).toBe(true);
+    expect(logs.some((line) => /retrying TTS on unlock/.test(line))).toBe(true);
+    expect(logs.some((line) => /not falling back to ara/.test(line))).toBe(true);
+    spyLog.mockRestore();
+    spyWarn.mockRestore();
+    spyErr.mockRestore();
+  });
+
   it("on unlock plays already-buffered frames without starting a new ElevenLabs HTTP request", async () => {
     const clock = { ms: 50 };
     const logs: string[] = [];

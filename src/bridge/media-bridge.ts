@@ -246,6 +246,7 @@ export class MediaBridge {
         this.logElStage("unlock", {
           ms_since_stream: msSinceStreamStart(this.calleeGate, unlockAtMs),
           cache_frames: cached?.frames.length ?? 0,
+          ...(cached?.failed ? { cache_failed: "true" } : {}),
         });
         void this.playCachedGreeting();
       } else {
@@ -799,10 +800,20 @@ export class MediaBridge {
   }
 
   private async playCachedGreeting(): Promise<void> {
+    const previous = this.greetingAudioCache.get(this.call.id);
+    const prefetchFailedEmpty = Boolean(previous?.failed && previous.frames.length === 0);
+    if (prefetchFailedEmpty) {
+      console.warn(
+        `[bridge ${this.call.id}] elevenlabs greeting prefetch failed cache_frames=0; retrying TTS on unlock (not falling back to ara)`,
+      );
+    }
     this.ensureGreetingPrefetch();
     const entry = this.greetingAudioCache.get(this.call.id);
     if (!entry || (entry.failed && entry.frames.length === 0)) {
       if (this.elevenLabsTts) {
+        console.warn(
+          `[bridge ${this.call.id}] elevenlabs greeting cache empty; starting live TTS retry`,
+        );
         await this.playElevenLabs(this.call.greeting, { isGreeting: true });
       }
       return;
@@ -813,6 +824,9 @@ export class MediaBridge {
     const cacheStatus = entry.frames.length > 0 ? "hit" : "prefetch";
     await this.drainPcmuBuffer(entry.buffer, { isGreeting: true, cacheStatus });
     if (entry.failed && entry.frames.length === 0 && this.elevenLabsTts) {
+      console.warn(
+        `[bridge ${this.call.id}] elevenlabs greeting cache still empty after drain; retrying live TTS`,
+      );
       await this.playElevenLabs(this.call.greeting, { isGreeting: true });
     }
   }

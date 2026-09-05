@@ -6,6 +6,7 @@ import {
   DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
   DEFAULT_ELEVENLABS_VOICE_ID,
   elevenLabsAudioPathActive,
+  elevenLabsModelSupportsOptimizeStreamingLatency,
   openaiAudioPathActive,
 } from "../src/tts.js";
 
@@ -58,6 +59,10 @@ describe("config", () => {
     expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
     expect(DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY).toBe(3);
     expect(DEFAULT_ELEVENLABS_VAD_SILENCE_MS).toBe(130);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_flash_v2_5")).toBe(true);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_turbo_v2_5")).toBe(true);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("multilingual_v2")).toBe(true);
   });
 
   it("honors GROK_VAD_* env overrides and clamps them", () => {
