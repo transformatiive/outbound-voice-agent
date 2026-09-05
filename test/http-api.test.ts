@@ -20,6 +20,14 @@ const config: AppConfig = {
   grokModel: "grok-voice-think-fast-2.0",
   grokVoiceSpeed: 1,
   elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v3", configured: false },
+  openai: {
+    apiKey: "",
+    baseUrl: "https://api.openai.com",
+    model: "gpt-realtime-2.1",
+    voice: "coral",
+    configured: false,
+    prewarmTimeoutMs: 2000,
+  },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
@@ -30,7 +38,7 @@ const config: AppConfig = {
   webhookUrl: "https://example.up.railway.app/webhooks/telnyx",
   mediaStreamUrl: (callId, token) =>
     `wss://example.up.railway.app/media-stream?callId=${encodeURIComponent(callId)}&token=${encodeURIComponent(token)}`,
-  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false },
+  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false, openai: false },
 };
 
 function mockTelnyx(): TelnyxClient {
@@ -68,12 +76,20 @@ describe("HTTP API", () => {
     expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
     expect(res.body.ready.outbound).toBe(true);
     expect(res.body.ready.elevenlabs).toBe(false);
+    expect(res.body.ready.openai).toBe(false);
     expect(res.body.tts).toEqual({
       default: "grok",
       grokVoice: "ara",
       elevenlabs: { configured: false, audioPathActive: false, model: "eleven_v3", voiceId: "" },
+      openai: {
+        configured: false,
+        audioPathActive: false,
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+      },
     });
     expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
+    expect(res.body.tts.openai.apiKey).toBeUndefined();
   });
 
   it("rejects outbound without Bearer API_KEY", async () => {
@@ -349,7 +365,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     const unready = {
       ...config,
       telnyxConnectionId: "",
-      ready: { api: true, telnyx: false, xai: true, outbound: false, elevenlabs: false },
+      ready: { api: true, telnyx: false, xai: true, outbound: false, elevenlabs: false, openai: false },
     };
     const { app } = createApp({ config: unready, telnyx });
     const res = await request(app)
@@ -530,5 +546,208 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(res.body.botRole).toBe("caller_booking");
     expect(res.body.calleeRole).toBe("venue_staff");
     expect(res.body.voice).toBe("ara");
+  });
+
+  it("returns 503 openai_not_configured when tts_provider is openai without OPENAI_API_KEY", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "openai",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("openai_not_configured");
+    expect(res.body.details).toMatch(/OPENAI_API_KEY/);
+    expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it("GET /health reports OpenAI configured without secrets when the key is set", async () => {
+    const withOpenAI = {
+      ...config,
+      openai: {
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+        configured: true,
+        prewarmTimeoutMs: 2000,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+    const { app } = createApp({ config: withOpenAI, telnyx });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body.tts.openai).toEqual({
+      configured: true,
+      audioPathActive: true,
+      model: "gpt-realtime-2.1",
+      voice: "coral",
+    });
+    expect(res.body.ready.openai).toBe(true);
+    expect(res.body.tts.openai.apiKey).toBeUndefined();
+  });
+
+  it("accepts tts_provider=openai when configured and echoes OpenAI voice/model, not ara", async () => {
+    const { connectFakeOpenAI } = await import("./helpers/fake-openai-ws.js");
+    const withOpenAI = {
+      ...config,
+      openai: {
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+        configured: true,
+        prewarmTimeoutMs: 2000,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+    const { app } = createApp({
+      config: withOpenAI,
+      telnyx,
+      connectOpenAI: () => connectFakeOpenAI() as unknown as import("ws").WebSocket,
+    });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: "secretária da empresa",
+        objective: "Reservar uma mesa para quinta.",
+        tts_provider: "openai",
+        openai_voice: "marin",
+        bot_role: "caller_booking",
+        callee_role: "venue_staff",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.ttsProvider).toBe("openai");
+    expect(res.body.voice).toBe("marin");
+    expect(res.body.model).toBe("gpt-realtime-2.1");
+    expect(res.body.language).toBe("pt-PT");
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+
+    const got = await request(app)
+      .get(`/api/calls/${res.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.body.ttsProvider).toBe("openai");
+    expect(got.body.voice).toBe("marin");
+    expect(got.body.greeting).toMatch(/Fala a secretária da empresa/);
+    expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
+  });
+
+  it("returns 503 openai_session_failed when the Realtime socket never becomes ready", async () => {
+    const { EventEmitter } = await import("node:events");
+    const { WebSocket } = await import("ws");
+    const withOpenAI = {
+      ...config,
+      openai: {
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+        configured: true,
+        prewarmTimeoutMs: 50,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+    const { app } = createApp({
+      config: withOpenAI,
+      telnyx,
+      connectOpenAI: () => {
+        const emitter = new EventEmitter();
+        return {
+          readyState: WebSocket.CONNECTING,
+          send() {
+            /* never opens */
+          },
+          close() {
+            emitter.emit("close");
+          },
+          on(event: string, fn: (...args: unknown[]) => void) {
+            emitter.on(event, fn);
+            return this;
+          },
+        } as unknown as import("ws").WebSocket;
+      },
+    });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        objective: "Reservar uma mesa",
+        tts_provider: "openai",
+      });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("openai_session_failed");
+    expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it("swapping tts_provider across grok | elevenlabs | openai keeps dial, persona, roles, and pt-PT", async () => {
+    const { connectFakeOpenAI } = await import("./helpers/fake-openai-ws.js");
+    const withAll = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezLnCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      openai: {
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+        configured: true,
+        prewarmTimeoutMs: 2000,
+      },
+      ready: { ...config.ready, elevenlabs: true, openai: true },
+    };
+    const { app } = createApp({
+      config: withAll,
+      telnyx,
+      connectOpenAI: () => connectFakeOpenAI() as unknown as import("ws").WebSocket,
+    });
+    const body = {
+      to: "+351912345678",
+      language: "pt-PT",
+      persona: "secretária da empresa",
+      objective: "Reservar uma mesa para 2 hoje à noite.",
+      waitForCallee: true,
+      bot_role: "caller_booking",
+      callee_role: "venue_staff",
+    };
+    const grok = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, tts_provider: "grok" });
+    const el = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, tts_provider: "elevenlabs" });
+    const openai = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, tts_provider: "openai" });
+    expect(grok.status).toBe(201);
+    expect(el.status).toBe(201);
+    expect(openai.status).toBe(201);
+    expect(grok.body.ttsProvider).toBe("grok");
+    expect(el.body.ttsProvider).toBe("elevenlabs");
+    expect(openai.body.ttsProvider).toBe("openai");
+    expect(el.body.language).toBe(grok.body.language);
+    expect(openai.body.language).toBe(grok.body.language);
+    expect(openai.body.botRole).toBe(grok.body.botRole);
+    expect(openai.body.to).toBe(grok.body.to);
+    expect(grok.body.voice).toBe("ara");
+    expect(el.body.voice).toBe("ara");
+    expect(openai.body.voice).toBe("coral");
+    expect(telnyx.dial).toHaveBeenCalledTimes(3);
   });
 });

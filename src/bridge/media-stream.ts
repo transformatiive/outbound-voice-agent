@@ -9,6 +9,7 @@ import { grokRealtimeUrl } from "../grok/session.js";
 import { MediaBridge, type JsonObject } from "./media-bridge.js";
 import { createElevenLabsTts } from "../elevenlabs.js";
 import type { CallRecord } from "../calls/types.js";
+import type { OpenAISessionStore } from "../openai/sessions.js";
 
 export type MediaStreamDeps = {
   config: AppConfig;
@@ -17,6 +18,7 @@ export type MediaStreamDeps = {
   onCallEnded: (call: CallRecord) => void;
   connectGrok?: (url: string, apiKey: string) => WebSocket;
   fetchImpl?: typeof fetch;
+  openaiSessions?: OpenAISessionStore;
 };
 
 export function attachMediaStream(server: HttpServer, deps: MediaStreamDeps): WebSocketServer {
@@ -45,6 +47,11 @@ async function handleMediaConnection(
   const call = deps.store.get(callId);
   if (!call || token !== call.streamToken) {
     telnyxWs.close(1008, "unauthorized");
+    return;
+  }
+
+  if (call.ttsProvider === "openai") {
+    handleOpenAIMediaConnection(telnyxWs, call, deps);
     return;
   }
 
@@ -127,6 +134,67 @@ async function handleMediaConnection(
     try {
       const event = JSON.parse(raw) as JsonObject;
       bridge.onTelnyxMessage(event);
+    } catch {
+      /* ignore */
+    }
+  });
+  telnyxWs.on("close", () => {
+    closeBoth();
+  });
+  telnyxWs.on("error", (err) => {
+    console.error(`[media ${call.id}] telnyx ws`, err);
+  });
+}
+
+function handleOpenAIMediaConnection(
+  telnyxWs: WebSocket,
+  call: CallRecord,
+  deps: MediaStreamDeps,
+): void {
+  const session = deps.openaiSessions?.take(call.id);
+  if (!session) {
+    console.error(
+      `[media ${call.id}] tts_provider=openai but Realtime session is missing; not falling back to Grok ara`,
+    );
+    telnyxWs.close(1011, "openai_session_missing");
+    if (call.telnyx.callControlId) {
+      void deps.telnyx.hangup(call.telnyx.callControlId).catch((err) => {
+        console.error(`[media ${call.id}] hangup after missing openai session`, err);
+      });
+    }
+    call.status = "failed";
+    call.endedReason = call.endedReason ?? "openai_session_missing";
+    call.endedAt = call.endedAt ?? new Date().toISOString();
+    deps.onCallEnded(call);
+    return;
+  }
+
+  session.bridge.setOnEnded(deps.onCallEnded);
+  const sendTelnyx = (event: JsonObject) => {
+    if (telnyxWs.readyState === WebSocket.OPEN) telnyxWs.send(JSON.stringify(event));
+  };
+  session.bridge.attachTelnyx(sendTelnyx);
+
+  const maxMs = deps.config.maxCallSeconds * 1000;
+  const timer = setTimeout(() => {
+    void session.bridge.requestHangup("timeout");
+  }, maxMs);
+
+  const closeBoth = () => {
+    clearTimeout(timer);
+    try {
+      telnyxWs.close();
+    } catch {
+      /* already closed */
+    }
+    session.close();
+  };
+
+  telnyxWs.on("message", (data) => {
+    const raw = typeof data === "string" ? data : data.toString();
+    try {
+      const event = JSON.parse(raw) as JsonObject;
+      session.bridge.onTelnyxMessage(event);
     } catch {
       /* ignore */
     }

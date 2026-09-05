@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID, elevenLabsAudioPathActive } from "../src/tts.js";
+import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID, elevenLabsAudioPathActive, openaiAudioPathActive } from "../src/tts.js";
 
 describe("config", () => {
   it("defaults caller ID, Grok voice ara, Live 2 model, and Telnyx app/OVP ids", () => {
@@ -34,6 +34,16 @@ describe("config", () => {
     });
     expect(cfg.ready.elevenlabs).toBe(false);
     expect(elevenLabsAudioPathActive(cfg.elevenlabs)).toBe(false);
+    expect(cfg.openai).toEqual({
+      apiKey: "",
+      baseUrl: "https://api.openai.com",
+      model: "gpt-realtime-2.1",
+      voice: "coral",
+      configured: false,
+      prewarmTimeoutMs: 8000,
+    });
+    expect(cfg.ready.openai).toBe(false);
+    expect(openaiAudioPathActive(cfg.openai)).toBe(false);
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezLnCDRKHkWiX");
     expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
   });
@@ -129,6 +139,44 @@ describe("config", () => {
     expect(overridden.ready.elevenlabs).toBe(true);
     expect(overridden.grokVoice).toBe("ara");
     expect(overridden.grokVoiceSpeed).toBe(1.05);
+  });
+
+  it("marks OpenAI ready when OPENAI_API_KEY is set (voice defaults to coral)", () => {
+    const withKey = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      OPENAI_API_KEY: "sk-test",
+    });
+    expect(withKey.openai.configured).toBe(true);
+    expect(withKey.ready.openai).toBe(true);
+    expect(openaiAudioPathActive(withKey.openai)).toBe(true);
+    expect(withKey.openai.voice).toBe("coral");
+    expect(withKey.openai.model).toBe("gpt-realtime-2.1");
+    expect(withKey.openai.baseUrl).toBe("https://api.openai.com");
+    expect(withKey.grokVoice).toBe("ara");
+
+    const overridden = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      OPENAI_API_KEY: "sk-test",
+      OPENAI_VOICE: "marin",
+      OPENAI_REALTIME_MODEL: "gpt-realtime",
+      OPENAI_BASE: "https://example.openai.internal/",
+    });
+    expect(overridden.openai).toEqual({
+      apiKey: "sk-test",
+      baseUrl: "https://example.openai.internal",
+      model: "gpt-realtime",
+      voice: "marin",
+      configured: true,
+      prewarmTimeoutMs: 8000,
+    });
+    expect(overridden.ready.openai).toBe(true);
+    expect(overridden.grokVoice).toBe("ara");
   });
 
   it("builds webhook and media stream URLs from PUBLIC_BASE_URL", () => {

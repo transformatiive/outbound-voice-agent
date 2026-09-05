@@ -266,7 +266,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.value.persona).toBe(dumped);
   });
 
-  it("accepts tts_provider grok | elevenlabs and rejects other values", () => {
+  it("accepts tts_provider grok | elevenlabs | openai and rejects other values", () => {
     const grok = parseOutboundBody({ ...base, tts_provider: "grok" });
     expect(grok.ok).toBe(true);
     if (!grok.ok) return;
@@ -277,17 +277,29 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     if (!labs.ok) return;
     expect(labs.value.ttsProvider).toBe("elevenlabs");
 
+    const openai = parseOutboundBody({ ...base, tts_provider: "openai", openai_voice: "marin" });
+    expect(openai.ok).toBe(true);
+    if (!openai.ok) return;
+    expect(openai.value.ttsProvider).toBe("openai");
+    expect(openai.value.openaiVoice).toBe("marin");
+
     expect(labs.value.language).toBe(grok.value.language);
+    expect(openai.value.language).toBe(grok.value.language);
     expect(labs.value.greeting).toBe(grok.value.greeting);
-    expect(labs.value.objective).toBe(grok.value.objective);
+    expect(openai.value.objective).toBe(grok.value.objective);
     expect(labs.value.botRole).toBe(grok.value.botRole);
-    expect(labs.value.calleeRole).toBe(grok.value.calleeRole);
+    expect(openai.value.calleeRole).toBe(grok.value.calleeRole);
     expect(labs.value.waitForCallee).toBe(grok.value.waitForCallee);
 
     const bad = parseOutboundBody({ ...base, tts_provider: "amazon" });
     expect(bad.ok).toBe(false);
     if (bad.ok) return;
     expect(bad.error).toMatchObject({ status: 400, error: "invalid_tts_provider" });
+
+    const badVoice = parseOutboundBody({ ...base, tts_provider: "openai", openai_voice: "robot" });
+    expect(badVoice.ok).toBe(false);
+    if (badVoice.ok) return;
+    expect(badVoice.error).toMatchObject({ status: 400, error: "invalid_openai_voice" });
   });
 
   it("accepts bot_role and callee_role labels", () => {
