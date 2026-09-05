@@ -58,6 +58,17 @@ async function handleMediaConnection(
     if (telnyxWs.readyState === WebSocket.OPEN) telnyxWs.send(JSON.stringify(event));
   };
 
+  const elevenLabsRequested = call.ttsProvider === "elevenlabs";
+  if (elevenLabsRequested && !deps.config.elevenlabs.configured) {
+    console.error(
+      `[media ${call.id}] tts_provider=elevenlabs but ELEVENLABS_API_KEY missing; not falling back to Grok ara`,
+    );
+  }
+  const elevenLabsTts =
+    elevenLabsRequested && deps.config.elevenlabs.configured
+      ? createElevenLabsTts(deps.config.elevenlabs, deps.fetchImpl ?? fetch)
+      : undefined;
+
   const bridge = new MediaBridge({
     call,
     sendGrok,
@@ -70,14 +81,7 @@ async function handleMediaConnection(
     calleeMinSpeechMs: deps.config.calleeMinSpeechMs,
     hangupDelayMs: deps.config.hangupPlayoutBufferMs,
     onEnded: deps.onCallEnded,
-    ...(call.ttsProvider === "elevenlabs" && deps.config.elevenlabs.configured
-      ? {
-          elevenLabsTts: createElevenLabsTts(
-            deps.config.elevenlabs,
-            deps.fetchImpl ?? fetch,
-          ),
-        }
-      : {}),
+    ...(elevenLabsTts ? { elevenLabsTts } : {}),
   });
 
   const maxMs = deps.config.maxCallSeconds * 1000;

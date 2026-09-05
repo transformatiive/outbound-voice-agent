@@ -876,6 +876,31 @@ describe("media bridge ElevenLabs TTS playback", () => {
     expect(tts.texts).toEqual(["Olá, fala a secretária."]);
   });
 
+  it("never forwards Grok ara when tts_provider=elevenlabs even if the EL client is missing", async () => {
+    const telnyxSend = vi.fn();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("not falling back to Grok ara"))).toBe(true);
+    await finishGreetingPlayback(bridge);
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "turn-1",
+      transcript: "Perfeito.",
+    });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("TTS-synthesizes later assistant transcripts and still ignores Grok audio", async () => {
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();

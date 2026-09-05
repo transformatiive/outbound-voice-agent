@@ -160,9 +160,16 @@ export class MediaBridge {
     });
     this.suppressAssistantAudio = false;
     this.greetingGrokDone = false;
-    this.greetingElDone = !this.usesElevenLabsPlayback();
-    if (this.usesElevenLabsPlayback()) {
-      void this.playElevenLabs(this.call.greeting, { isGreeting: true });
+    const elClientReady = this.wantsElevenLabsPlayback() && this.elevenLabsTts !== undefined;
+    this.greetingElDone = !elClientReady;
+    if (this.wantsElevenLabsPlayback()) {
+      if (this.elevenLabsTts) {
+        void this.playElevenLabs(this.call.greeting, { isGreeting: true });
+      } else {
+        console.error(
+          `[bridge ${this.call.id}] tts_provider=elevenlabs but TTS client missing; not falling back to Grok ara`,
+        );
+      }
     }
     // Keep create_response false while the scripted greeting plays so the model
     // cannot immediately re-introduce itself. Instructions switch to "already delivered".
@@ -349,7 +356,7 @@ export class MediaBridge {
       this.grokResponsePending = true;
       this.suppressAssistantAudio = false;
       if (responseId) this.greetingResponseId = responseId;
-      if (!this.usesElevenLabsPlayback()) this.beginTurnAudio();
+      if (!this.wantsElevenLabsPlayback()) this.beginTurnAudio();
       return;
     }
     if (this.suppressUntilNextCalleeSpeech) {
@@ -358,7 +365,7 @@ export class MediaBridge {
     }
     this.grokResponsePending = true;
     this.suppressAssistantAudio = false;
-    if (this.usesElevenLabsPlayback()) {
+    if (this.wantsElevenLabsPlayback()) {
       this.elExpectingUtterance = true;
       this.turnAudio.done = false;
     } else {
@@ -368,8 +375,12 @@ export class MediaBridge {
 
   private onGrokResponseDone(event: JsonObject): void {
     this.grokResponsePending = false;
-    if (this.usesElevenLabsPlayback()) {
-      if (this.elExpectingUtterance && !this.elInFlight) {
+    if (this.wantsElevenLabsPlayback()) {
+      if (!this.elevenLabsTts) {
+        this.elExpectingUtterance = false;
+        this.turnAudio.done = true;
+        this.flushResponseDoneWaiters();
+      } else if (this.elExpectingUtterance && !this.elInFlight) {
         const leftover = assistantTextFromResponse(event);
         if (leftover) {
           this.maybeSpeakAssistantText(leftover, responseIdFromEvent(event));
@@ -412,7 +423,7 @@ export class MediaBridge {
   }
 
   private forwardGrokAudio(event: JsonObject): void {
-    if (this.usesElevenLabsPlayback()) return;
+    if (this.wantsElevenLabsPlayback()) return;
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     if (this.suppressAssistantAudio) return;
@@ -478,8 +489,9 @@ export class MediaBridge {
     return true;
   }
 
-  private usesElevenLabsPlayback(): boolean {
-    return this.call.ttsProvider === "elevenlabs" && this.elevenLabsTts !== undefined;
+  /** Telnyx must hear ElevenLabs, never Grok ara, when this call requested elevenlabs. */
+  private wantsElevenLabsPlayback(): boolean {
+    return this.call.ttsProvider === "elevenlabs";
   }
 
   private abortElevenLabsPlayback(): void {
@@ -488,7 +500,7 @@ export class MediaBridge {
     this.elAbort = undefined;
     this.elInFlight = false;
     this.elExpectingUtterance = false;
-    if (this.usesElevenLabsPlayback()) {
+    if (this.wantsElevenLabsPlayback()) {
       this.turnAudio.done = true;
     }
     this.flushResponseDoneWaiters();
@@ -502,7 +514,13 @@ export class MediaBridge {
   }
 
   private maybeSpeakAssistantText(text: string, responseId: string): void {
-    if (!this.usesElevenLabsPlayback()) return;
+    if (!this.wantsElevenLabsPlayback()) return;
+    if (!this.elevenLabsTts) {
+      this.elExpectingUtterance = false;
+      this.turnAudio.done = true;
+      this.flushResponseDoneWaiters();
+      return;
+    }
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     if (this.greetingPlaying) return;

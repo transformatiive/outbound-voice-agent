@@ -44,11 +44,9 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 `language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `pt-PT` is European Portuguese only — never Brazilian (`pt-BR`), including vocabulary and greeting patterns («Oi», «Tudo bem?», «bem-vindo ao restaurante»).
 
-`tts_provider` is optional: `grok` | `elevenlabs` (default `grok`). Grok voice stays **`ara`** for STT and dialogue on every call.
+`tts_provider` is optional: `grok` | `elevenlabs` (default `grok`). Grok and ElevenLabs are **interchangeable on the same API/call**. Same dial flow, same `persona` / `objective` / roles / `pt-PT` fields — only Telnyx TTS/voice changes. `tts_provider=grok` → real Grok **ara** PCMU. `tts_provider=elevenlabs` → real Benedita (`ELEVENLABS_VOICE_ID`, default `NkpT2jezLnCDRKHkWiX`) + `eleven_v3` PCMU. Grok Voice Live still does STT and dialogue on every call. **Never** fall back to ara when `elevenlabs` is requested: if the key is missing, `POST /api/outbound` returns **503 `elevenlabs_not_configured`** and does not dial; if the key is present, Telnyx hears Benedita (or silence on TTS failure), never silent ara.
 
-**TRNSF:** send `tts_provider: "elevenlabs"` on `POST /api/outbound` (snake_case). The JSON field is `tts_provider`; the API echoes `ttsProvider`. That keeps Grok Voice Live for input audio, transcripts, text, and `end_call`, and plays **ElevenLabs Benedita** (`ELEVENLABS_VOICE_ID`, default `NkpT2jezLnCDRKHkWiX`) on the Telnyx PSTN leg as PCMU / μ-law 8 kHz. Developer sets `ELEVENLABS_API_KEY` on Railway (secret, never in git). Model defaults to `eleven_v3`. If the API key is unset, `tts_provider=elevenlabs` returns **503 `elevenlabs_not_configured`**. `GET /health` reports `tts.elevenlabs.configured` (key present) and `tts.elevenlabs.audioPathActive` (the Benedita → Telnyx pipeline is live, not a stub).
-
-Grok `tts_provider` is unchanged: Telnyx still hears Grok `ara` PCMU.
+**TRNSF:** send `tts_provider: "elevenlabs"` on `POST /api/outbound` (snake_case). The JSON field is `tts_provider`; the API echoes `ttsProvider`. Developer sets `ELEVENLABS_API_KEY` on Railway (secret, never in git). `GET /health` reports `tts.elevenlabs.configured` (key present) and `tts.elevenlabs.audioPathActive` (the Benedita → Telnyx pipeline is live, not a stub). Anti-invent venue facts apply to both providers.
 
 `bot_role` (default `caller_booking`) and `callee_role` (default `venue_staff`) are optional labels. The bot **always** placed the call and requests the booking. The callee answered (venue staff / reception). The bot never welcomes as the restaurant and never offers tables as the house.
 
