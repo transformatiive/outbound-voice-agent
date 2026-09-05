@@ -14,6 +14,8 @@ import {
 } from "./telnyx/webhooks.js";
 import { placeOutboundCall } from "./outbound.js";
 import { LANGUAGES } from "./prompt.js";
+import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
+import { DEFAULT_TTS_PROVIDER } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
@@ -62,6 +64,14 @@ export function createApp(deps: AppDeps): CreatedApp {
       languages: LANGUAGES,
       model: deps.config.grokModel,
       from: deps.config.fromNumber,
+      tts: {
+        default: "grok",
+        grokVoice: deps.config.grokVoice,
+        elevenlabs: {
+          configured: deps.config.elevenlabs.configured,
+          model: deps.config.elevenlabs.model,
+        },
+      },
       telnyx: {
         connectionId: deps.config.telnyxConnectionId,
         outboundVoiceProfileId: deps.config.telnyxOutboundVoiceProfileId,
@@ -131,6 +141,9 @@ export function createApp(deps: AppDeps): CreatedApp {
       voice: result.call.voice,
       model: result.call.model,
       waitForCallee: result.call.waitForCallee === true,
+      ttsProvider: result.call.ttsProvider ?? DEFAULT_TTS_PROVIDER,
+      botRole: result.call.botRole ?? DEFAULT_BOT_ROLE,
+      calleeRole: result.call.calleeRole ?? DEFAULT_CALLEE_ROLE,
       createdAt: result.call.createdAt,
     });
   });

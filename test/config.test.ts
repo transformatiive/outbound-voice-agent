@@ -23,8 +23,15 @@ describe("config", () => {
       idleTimeoutMs: 12_000,
     });
     expect(cfg.calleeSpeechGraceMs).toBe(500);
-    expect(cfg.calleeMinSpeechMs).toBe(130);
+    expect(cfg.calleeMinSpeechMs).toBe(80);
     expect(cfg.hangupPlayoutBufferMs).toBe(1000);
+    expect(cfg.elevenlabs).toEqual({
+      apiKey: "",
+      voiceId: "",
+      model: "eleven_v3",
+      configured: false,
+    });
+    expect(cfg.ready.elevenlabs).toBe(false);
   });
 
   it("honors GROK_VAD_* env overrides and clamps them", () => {
@@ -82,6 +89,40 @@ describe("config", () => {
     });
     expect(cfg.ready.telnyx).toBe(false);
     expect(cfg.ready.outbound).toBe(false);
+  });
+
+  it("marks ElevenLabs ready only when API key and voice id are both set", () => {
+    const missingVoice = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      ELEVENLABS_API_KEY: "el-key",
+    });
+    expect(missingVoice.elevenlabs.configured).toBe(false);
+    expect(missingVoice.ready.elevenlabs).toBe(false);
+    expect(missingVoice.elevenlabs.model).toBe("eleven_v3");
+    expect(missingVoice.grokVoice).toBe("ara");
+    expect(missingVoice.grokVoiceSpeed).toBe(1.05);
+
+    const ready = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      ELEVENLABS_API_KEY: "el-key",
+      ELEVENLABS_VOICE_ID: "el-voice",
+      ELEVENLABS_MODEL: "eleven_v3",
+    });
+    expect(ready.elevenlabs).toEqual({
+      apiKey: "el-key",
+      voiceId: "el-voice",
+      model: "eleven_v3",
+      configured: true,
+    });
+    expect(ready.ready.elevenlabs).toBe(true);
+    expect(ready.grokVoice).toBe("ara");
+    expect(ready.grokVoiceSpeed).toBe(1.05);
   });
 
   it("builds webhook and media stream URLs from PUBLIC_BASE_URL", () => {

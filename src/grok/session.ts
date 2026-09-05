@@ -109,6 +109,8 @@ export function sessionUpdatePayload(input: {
   createResponse?: boolean;
   includeIdleTimeout?: boolean;
   outputSpeed?: number;
+  botRole?: string;
+  calleeRole?: string;
 }): GrokSessionUpdate {
   const waitForCallee = input.waitForCallee === true;
   const createResponse = input.createResponse ?? !waitForCallee;

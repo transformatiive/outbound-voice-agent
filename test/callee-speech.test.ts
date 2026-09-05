@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
+  calleeTranscriptFromEvent,
   createCalleeSpeechGate,
   hasPendingPostGraceUnlock,
   isNonEmptyCalleeTranscript,
@@ -20,9 +21,9 @@ const config = {
 };
 
 describe("callee speech gate (waitForCallee)", () => {
-  it("defaults grace to 500ms and min speech to 130ms", () => {
+  it("defaults grace to 500ms and min speech to 80ms", () => {
     expect(DEFAULT_CALLEE_SPEECH_GRACE_MS).toBe(500);
-    expect(DEFAULT_CALLEE_MIN_SPEECH_MS).toBe(130);
+    expect(DEFAULT_CALLEE_MIN_SPEECH_MS).toBe(80);
   });
 
   it("reports milliseconds since stream start", () => {
@@ -39,12 +40,31 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(isNonEmptyCalleeTranscript("Estou")).toBe(true);
     expect(isShortCalleeGreeting("Estou")).toBe(true);
     expect(isShortCalleeGreeting("estou?")).toBe(true);
+    expect(isShortCalleeGreeting("Estou?")).toBe(true);
+    expect(isShortCalleeGreeting("«estou?»")).toBe(true);
+    expect(isShortCalleeGreeting("estou ?")).toBe(true);
+    expect(isShortCalleeGreeting("Estou.")).toBe(true);
+    expect(isShortCalleeGreeting("estou eu")).toBe(true);
     expect(isShortCalleeGreeting("Alô")).toBe(true);
     expect(isShortCalleeGreeting("sim")).toBe(true);
     expect(isShortCalleeGreeting("ok")).toBe(true);
     expect(isShortCalleeGreeting("hello")).toBe(true);
     expect(isShortCalleeGreeting("Two")).toBe(true);
     expect(isShortCalleeGreeting("Confirmar a marcação de quinta")).toBe(false);
+  });
+
+  it("reads estou? from nested Grok transcript payloads", () => {
+    expect(calleeTranscriptFromEvent({ transcript: "estou?" })).toBe("estou?");
+    expect(calleeTranscriptFromEvent({ transcript: { text: "Estou?" } })).toBe("Estou?");
+    expect(
+      calleeTranscriptFromEvent({
+        item: { content: [{ transcript: "«estou?»" }] },
+      }),
+    ).toBe("«estou?»");
+    expect(onTranscript(true, calleeTranscriptFromEvent({ transcript: { text: "estou?" } }))).toEqual({
+      unlock: true,
+      reason: "short_greeting",
+    });
   });
 
   it("does not unlock on speech_started during the post-answer grace window (ringback/noise)", () => {
@@ -87,7 +107,7 @@ describe("callee speech gate (waitForCallee)", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
     onSpeechStarted(gate, true, 600, config);
-    const tooShort = onSpeechStopped(gate, true, 600 + 80, config);
+    const tooShort = onSpeechStopped(gate, true, 600 + 50, config);
     expect(tooShort).toEqual({ unlock: false, reason: "speech_too_short" });
 
     onSpeechStarted(gate, true, 900, config);
@@ -108,8 +128,11 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(onTranscript(true, "")).toEqual({ unlock: false, reason: "empty_transcript" });
   });
 
-  it("unlocks immediately on short greetings including estou / alô / sim / ok / hello", () => {
+  it("unlocks immediately on short greetings including estou / estou? / alô / sim / ok / hello", () => {
     expect(onTranscript(true, "Estou")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "estou?")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "Estou?")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "«estou?»")).toEqual({ unlock: true, reason: "short_greeting" });
     expect(onTranscript(true, "alô")).toEqual({ unlock: true, reason: "short_greeting" });
     expect(onTranscript(true, "Sim.")).toEqual({ unlock: true, reason: "short_greeting" });
     expect(onTranscript(true, "ok")).toEqual({ unlock: true, reason: "short_greeting" });
@@ -166,5 +189,23 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(onSpeechStopped(gate, false, 2300, config)).toEqual({ unlock: false, reason: "not_waiting" });
     expect(onTranscript(false, "Estou")).toEqual({ unlock: false, reason: "not_waiting" });
     expect(onPostGraceCheck(gate, false, 2000, config)).toEqual({ unlock: false, reason: "not_waiting" });
+  });
+
+  it("unlocks a ~90ms first-turn «estou» after grace even with empty ASR", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 520, config);
+    const stopped = onSpeechStopped(gate, true, 610, config, 90);
+    expect(stopped).toEqual({ unlock: true, reason: "min_speech_duration" });
+  });
+
+  it("queues a short in-grace «estou» of 90ms and unlocks when grace ends", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 200, config);
+    const during = onSpeechStopped(gate, true, 290, config, 90);
+    expect(during).toEqual({ unlock: false, reason: "grace_period" });
+    expect(hasPendingPostGraceUnlock(gate)).toBe(true);
+    expect(onPostGraceCheck(gate, true, 500, config)).toEqual({ unlock: true, reason: "grace_elapsed" });
   });
 });

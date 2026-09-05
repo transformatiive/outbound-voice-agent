@@ -309,6 +309,50 @@ describe("media bridge Telnyx ↔ Grok", () => {
     spyLog.mockRestore();
   });
 
+  it("unlocks waitForCallee on «estou?» including nested transcript payloads", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 220;
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u-estou-q",
+      transcript: "estou?",
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(
+      logs.some((line) => /unlock via short_greeting \(transcript\).*text="estou\?"/.test(line)),
+    ).toBe(true);
+
+    const grokSend2 = vi.fn();
+    const bridge2 = new MediaBridge({
+      call: { ...sampleCall(), id: "call-2", waitForCallee: true },
+      sendGrok: grokSend2,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => 300,
+    });
+    bridge2.onTelnyxMessage({ event: "start" });
+    await bridge2.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u-nested",
+      transcript: { text: "Estou?" },
+    });
+    expect(forceMessageCount(grokSend2)).toBe(1);
+    spyLog.mockRestore();
+  });
+
   it("records assistant and user transcripts", () => {
     const bridge = new MediaBridge({
       call: sampleCall(),
@@ -604,7 +648,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(forceMessageCount(grokSend)).toBe(0);
 
-    clock.ms = 580;
+    clock.ms = 550;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
     expect(forceMessageCount(grokSend)).toBe(0);
 

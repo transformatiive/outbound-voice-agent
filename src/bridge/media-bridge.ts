@@ -17,6 +17,7 @@ import {
   onSpeechStarted,
   onSpeechStopped,
   onTranscript,
+  calleeTranscriptFromEvent,
   type CalleeSpeechDecision,
   type CalleeSpeechGate,
   type CalleeSpeechGateConfig,
@@ -114,6 +115,8 @@ export class MediaBridge {
           : {}),
         ...(waitForCallee ? { waitForCallee: true } : {}),
         ...(this.call.timezone ? { timezone: this.call.timezone } : {}),
+        ...(this.call.botRole ? { botRole: this.call.botRole } : {}),
+        ...(this.call.calleeRole ? { calleeRole: this.call.calleeRole } : {}),
         turnDetection: this.turnDetection,
         createResponse: autoRespond,
         includeIdleTimeout: autoRespond,
@@ -227,13 +230,14 @@ export class MediaBridge {
         return;
       }
       case "conversation.item.input_audio_transcription.completed":
-      case "conversation.item.input_audio_transcription.updated": {
+      case "conversation.item.input_audio_transcription.updated":
+      case "conversation.item.input_audio_transcription.delta": {
         const itemId = typeof event.item_id === "string" ? event.item_id : "";
-        const raw = typeof event.transcript === "string" ? event.transcript : "";
+        const raw = calleeTranscriptFromEvent(event);
         const transcript = raw.trim();
         if (this.isWaitingForCalleeSpeech()) {
           const decision = onTranscript(true, raw);
-          this.logCalleeGate(decision, "transcript");
+          this.logCalleeGate(decision, "transcript", raw);
           if (!decision.unlock) return;
           if (itemId && transcript) this.pendingUser.set(itemId, transcript);
           this.speakGreeting();
@@ -437,19 +441,21 @@ export class MediaBridge {
     if (decision.unlock) this.speakGreeting();
   }
 
-  private logCalleeGate(decision: CalleeSpeechDecision, event: string): void {
+  private logCalleeGate(decision: CalleeSpeechDecision, event: string, transcript?: string): void {
     if (decision.reason === "not_waiting") return;
     const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
     const elapsedLabel =
       elapsed === undefined ? "stream not started" : `${elapsed}ms since stream start`;
+    const textLabel =
+      transcript !== undefined ? ` text=${JSON.stringify(transcript.slice(0, 80))}` : "";
     if (decision.unlock) {
       console.info(
-        `[bridge ${this.call.id}] waitForCallee: unlock via ${decision.reason} (${event}) — ${elapsedLabel}`,
+        `[bridge ${this.call.id}] waitForCallee: unlock via ${decision.reason} (${event}) — ${elapsedLabel}${textLabel}`,
       );
       return;
     }
     console.info(
-      `[bridge ${this.call.id}] waitForCallee: greeting blocked (${decision.reason}) on ${event} — ${elapsedLabel}`,
+      `[bridge ${this.call.id}] waitForCallee: greeting blocked (${decision.reason}) on ${event} — ${elapsedLabel}${textLabel}`,
     );
   }
 
