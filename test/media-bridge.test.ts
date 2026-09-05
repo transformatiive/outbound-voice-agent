@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MediaBridge } from "../src/bridge/media-bridge.js";
+import type { ElevenLabsTts } from "../src/elevenlabs.js";
 import type { CallRecord } from "../src/calls/types.js";
 import type { TelnyxClient } from "../src/telnyx/client.js";
 
@@ -820,6 +821,228 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(
       (update.session as { turn_detection: { create_response: boolean } }).turn_detection.create_response,
     ).toBe(false);
+  });
+});
+
+const EL_PCMU = Buffer.alloc(160, 0x7f).toString("base64");
+
+function mockElevenLabsTts(): ElevenLabsTts & { texts: string[] } {
+  const texts: string[] = [];
+  return {
+    texts,
+    async *speakToPcmu(input) {
+      texts.push(input.text);
+      yield EL_PCMU;
+    },
+  };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+}
+
+describe("media bridge ElevenLabs TTS playback", () => {
+  function elCall(): CallRecord {
+    return { ...sampleCall(), ttsProvider: "elevenlabs" };
+  }
+
+  it("speaks the greeting via ElevenLabs PCMU and does not forward Grok audio deltas", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const tts = mockElevenLabsTts();
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: tts,
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    expect(tts.texts).toEqual(["Olá, fala a secretária."]);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+    expect(forceMessageCount(grokSend)).toBe(1);
+
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "greeting" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "greeting",
+      transcript: "Olá, fala a secretária.",
+    });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    await bridge.onGrokEvent({ type: "response.done" });
+    expect(tts.texts).toEqual(["Olá, fala a secretária."]);
+  });
+
+  it("never forwards Grok ara when tts_provider=elevenlabs even if the EL client is missing", async () => {
+    const telnyxSend = vi.fn();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    expect(spy.mock.calls.some((c) => String(c[0]).includes("not falling back to Grok ara"))).toBe(true);
+    await finishGreetingPlayback(bridge);
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "turn-1",
+      transcript: "Perfeito.",
+    });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("TTS-synthesizes later assistant transcripts and still ignores Grok audio", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const tts = mockElevenLabsTts();
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: tts,
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    await finishGreetingPlayback(bridge);
+    telnyxSend.mockClear();
+    tts.texts.length = 0;
+
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "turn-1",
+      transcript: "Perfeito, mesa para as 18h.",
+    });
+    await flushMicrotasks();
+    expect(tts.texts).toEqual(["Perfeito, mesa para as 18h."]);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+    await bridge.onGrokEvent({ type: "response.done", response_id: "turn-1" });
+  });
+
+  it("barge-in clears Telnyx, cancels Grok, and aborts in-flight ElevenLabs playback", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    let abortSeen = false;
+    let calls = 0;
+    const hanging: ElevenLabsTts = {
+      async *speakToPcmu(input) {
+        calls += 1;
+        yield EL_PCMU;
+        if (calls === 1) return;
+        await new Promise<void>((_resolve, reject) => {
+          if (input.signal.aborted) {
+            abortSeen = true;
+            const err = new Error("Aborted");
+            err.name = "AbortError";
+            reject(err);
+            return;
+          }
+          input.signal.addEventListener("abort", () => {
+            abortSeen = true;
+            const err = new Error("Aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        });
+      },
+    };
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: hanging,
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    await finishGreetingPlayback(bridge);
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    const speakP = bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "turn-1",
+      transcript: "Queria uma mesa.",
+    });
+    await flushMicrotasks();
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+
+    telnyxSend.mockClear();
+    grokSend.mockClear();
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+    await speakP.catch(() => undefined);
+    await flushMicrotasks();
+    expect(abortSeen).toBe(true);
+
+    telnyxSend.mockClear();
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAFTER" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+  });
+
+  it("holds hangup until ElevenLabs goodbye PCMU has been queued", async () => {
+    vi.useFakeTimers();
+    const hangup = vi.fn(async () => undefined);
+    const oneSecond = Buffer.alloc(8000, 0x7f).toString("base64");
+    const tts: ElevenLabsTts = {
+      async *speakToPcmu(input) {
+        if (input.text === "Olá, fala a secretária.") {
+          yield Buffer.alloc(160, 0x7f).toString("base64");
+          return;
+        }
+        yield oneSecond;
+      },
+    };
+    const bridge = new MediaBridge({
+      call: elCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup },
+      hangupDelayMs: 200,
+      hangupMaxWaitMs: 20_000,
+      elevenLabsTts: tts,
+    });
+    bridge.speakGreeting();
+    await flushMicrotasks();
+    await finishGreetingPlayback(bridge);
+
+    await bridge.onGrokEvent({ type: "response.created", response_id: "bye" });
+    await bridge.onGrokEvent({
+      type: "response.output_audio_transcript.done",
+      response_id: "bye",
+      transcript: "Obrigado, até logo.",
+    });
+    await flushMicrotasks();
+    const hangupP = bridge.onGrokEvent({
+      type: "response.function_call_arguments.done",
+      name: "end_call",
+      call_id: "tool-bye",
+    });
+    await Promise.resolve();
+    expect(hangup).not.toHaveBeenCalled();
+    await bridge.onGrokEvent({ type: "response.done" });
+    expect(hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1199);
+    expect(hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await hangupP;
+    expect(hangup).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 });
 

@@ -15,7 +15,7 @@ import {
 import { placeOutboundCall } from "./outbound.js";
 import { LANGUAGES } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
-import { DEFAULT_TTS_PROVIDER } from "./tts.js";
+import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
@@ -69,6 +69,7 @@ export function createApp(deps: AppDeps): CreatedApp {
         grokVoice: deps.config.grokVoice,
         elevenlabs: {
           configured: deps.config.elevenlabs.configured,
+          audioPathActive: elevenLabsAudioPathActive(deps.config.elevenlabs),
           model: deps.config.elevenlabs.model,
           voiceId: deps.config.elevenlabs.voiceId,
         },
@@ -166,6 +167,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       telnyx: deps.telnyx,
       onCallEnded,
       ...(deps.connectGrok ? { connectGrok: deps.connectGrok } : {}),
+      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     });
   }
 

@@ -277,6 +277,13 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     if (!labs.ok) return;
     expect(labs.value.ttsProvider).toBe("elevenlabs");
 
+    expect(labs.value.language).toBe(grok.value.language);
+    expect(labs.value.greeting).toBe(grok.value.greeting);
+    expect(labs.value.objective).toBe(grok.value.objective);
+    expect(labs.value.botRole).toBe(grok.value.botRole);
+    expect(labs.value.calleeRole).toBe(grok.value.calleeRole);
+    expect(labs.value.waitForCallee).toBe(grok.value.waitForCallee);
+
     const bad = parseOutboundBody({ ...base, tts_provider: "amazon" });
     expect(bad.ok).toBe(false);
     if (bad.ok) return;

@@ -233,6 +233,11 @@ describe("prompt / language", () => {
         expect(text).toMatch(/NUNCA inventes factos/);
         expect(text).toMatch(/número de pessoas/);
         expect(text).toMatch(/preços/);
+        expect(text).toMatch(/ementas/);
+        expect(text).toMatch(/políticas/);
+        expect(text).toMatch(/horário de abertura/);
+        expect(text).toMatch(/só abre às/);
+        expect(text).toMatch(/DO QUE ELE DISSE/);
         expect(text).toMatch(/pergunta curta/);
       } else {
         expect(text).toMatch(/exactly once/);
@@ -242,6 +247,11 @@ describe("prompt / language", () => {
         expect(text).toMatch(/NEVER invent facts/);
         expect(text).toMatch(/headcount/);
         expect(text).toMatch(/prices/);
+        expect(text).toMatch(/menus/);
+        expect(text).toMatch(/policies/);
+        expect(text).toMatch(/opening hours/);
+        expect(text).toMatch(/only opens at/);
+        expect(text).toMatch(/THEIR statement/);
         expect(text).toMatch(/clarifying question/);
       }
       assertNoSpokenBranding(text);
@@ -342,5 +352,57 @@ describe("prompt / language", () => {
     expect(en).toMatch(/After the venue confirms/);
     expect(en).toMatch(/thank them/i);
     assertNoSpokenBranding(en);
+  });
+
+  it("forbids inventing restaurant opening hours or other venue facts the callee did not state", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Fala a secretária.",
+      objective: "Reservar mesa para 2 hoje à noite.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/NUNCA inventes factos/);
+    expect(pt).toMatch(/horário de abertura/);
+    expect(pt).toMatch(/disponibilidade/);
+    expect(pt).toMatch(/preços/);
+    expect(pt).toMatch(/ementas/);
+    expect(pt).toMatch(/políticas/);
+    expect(pt).toMatch(/facto do estabelecimento/);
+    expect(pt).toMatch(/só abre às 19h/);
+    expect(pt).toMatch(/só abre às X/);
+    expect(pt).toMatch(/Se propuser uma hora/);
+    expect(pt).toMatch(/DO QUE ELE DISSE/);
+    expect(pt).toMatch(/uma pergunta curta só se estiver ambíguo/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good evening. I'm calling from the secretary.",
+      objective: "Book a table for 2 tonight.",
+      waitForCallee: true,
+    });
+    expect(en).toMatch(/NEVER invent facts/);
+    expect(en).toMatch(/opening hours/);
+    expect(en).toMatch(/availability/);
+    expect(en).toMatch(/prices/);
+    expect(en).toMatch(/menus/);
+    expect(en).toMatch(/policies/);
+    expect(en).toMatch(/venue fact/);
+    expect(en).toMatch(/only opens at 7pm/);
+    expect(en).toMatch(/only opens at X/);
+    expect(en).toMatch(/If they propose a time/);
+    expect(en).toMatch(/THEIR statement/);
+    expect(en).toMatch(/one short clarifying question/);
+    assertNoSpokenBranding(en);
+
+    const us = buildSessionInstructions({
+      language: "en-US",
+      greeting: "Hello.",
+      objective: "Book a table.",
+    });
+    expect(us).toMatch(/opening hours/);
+    expect(us).toMatch(/only opens at/);
+    expect(us).toMatch(/THEIR statement/);
+    assertNoSpokenBranding(us);
   });
 });

@@ -3,8 +3,8 @@ export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
-/** IVC clone. Not a secret — Nuno may swap via ELEVENLABS_VOICE_ID. */
-export const DEFAULT_ELEVENLABS_VOICE_ID = "tnL8F53kfXcNNVSwbLzy";
+/** Benedita. Not a secret — override with ELEVENLABS_VOICE_ID. */
+export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezLnCDRKHkWiX";
 
 export type ElevenLabsConfig = {
   apiKey: string;
@@ -40,4 +40,9 @@ export function elevenlabsConfigFromEnv(env: Record<string, string | undefined>)
     model,
     configured: Boolean(apiKey),
   };
+}
+
+/** True when the HTTP TTS → Telnyx PCMU pipeline can run (API key present). */
+export function elevenLabsAudioPathActive(config: ElevenLabsConfig): boolean {
+  return config.configured;
 }

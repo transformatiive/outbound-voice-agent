@@ -1,4 +1,5 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
+import type { ElevenLabsTts } from "../elevenlabs.js";
 import {
   DEFAULT_OUTPUT_SPEED,
   DEFAULT_TURN_DETECTION,
@@ -48,6 +49,7 @@ export type MediaBridgeOptions = {
   onEnded?: (call: CallRecord) => void;
   now?: () => string;
   clockMs?: () => number;
+  elevenLabsTts?: ElevenLabsTts;
 };
 
 export class MediaBridge {
@@ -74,6 +76,16 @@ export class MediaBridge {
   private grokResponsePending = false;
   private readonly pendingUser = new Map<string, string>();
   private grokConfigured = false;
+  private readonly elevenLabsTts: ElevenLabsTts | undefined;
+  private elGeneration = 0;
+  private elAbort: AbortController | undefined;
+  private elInFlight = false;
+  private elExpectingUtterance = false;
+  private greetingElDone = true;
+  private greetingGrokDone = true;
+  private greetingResponseId = "";
+  private lastElSpokenText = "";
+  private readonly elSpokenResponseIds = new Set<string>();
   private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
     playMs: 0,
     firstDeltaAtMs: undefined,
@@ -100,6 +112,7 @@ export class MediaBridge {
     this.onEnded = opts.onEnded;
     this.now = opts.now ?? (() => new Date().toISOString());
     this.clockMs = opts.clockMs ?? Date.now;
+    this.elevenLabsTts = opts.elevenLabsTts;
   }
 
   configureGrokSession(): void {
@@ -146,6 +159,18 @@ export class MediaBridge {
       },
     });
     this.suppressAssistantAudio = false;
+    this.greetingGrokDone = false;
+    const elClientReady = this.wantsElevenLabsPlayback() && this.elevenLabsTts !== undefined;
+    this.greetingElDone = !elClientReady;
+    if (this.wantsElevenLabsPlayback()) {
+      if (this.elevenLabsTts) {
+        void this.playElevenLabs(this.call.greeting, { isGreeting: true });
+      } else {
+        console.error(
+          `[bridge ${this.call.id}] tts_provider=elevenlabs but TTS client missing; not falling back to Grok ara`,
+        );
+      }
+    }
     // Keep create_response false while the scripted greeting plays so the model
     // cannot immediately re-introduce itself. Instructions switch to "already delivered".
     this.configureGrokSession();
@@ -189,10 +214,10 @@ export class MediaBridge {
         if (this.call.waitForCallee !== true) this.speakGreeting();
         return;
       case "response.created":
-        this.onGrokResponseCreated();
+        this.onGrokResponseCreated(event);
         return;
       case "response.done":
-        this.onGrokResponseDone();
+        this.onGrokResponseDone(event);
         return;
       case "input_audio_buffer.timeout_triggered":
         if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse(true);
@@ -248,11 +273,14 @@ export class MediaBridge {
         return;
       }
       case "response.output_audio_transcript.done":
-      case "response.audio_transcript.done": {
+      case "response.audio_transcript.done":
+      case "response.output_text.done":
+      case "response.text.done": {
         if (this.isWaitingForCalleeSpeech()) return;
         this.flushUserTranscript();
-        const transcript = typeof event.transcript === "string" ? event.transcript.trim() : "";
+        const transcript = assistantTextFromEvent(event);
         if (transcript) this.pushTranscript({ role: "assistant", text: transcript });
+        this.maybeSpeakAssistantText(transcript, responseIdFromEvent(event));
         return;
       }
       case "response.function_call_arguments.done":
@@ -301,6 +329,7 @@ export class MediaBridge {
   }
 
   markEnded(reason: string): void {
+    this.abortElevenLabsPlayback();
     if (this.call.status === "completed" || this.call.status === "failed" || this.call.status === "no_answer" || this.call.status === "busy") {
       this.onEnded?.(this.call);
       return;
@@ -316,7 +345,8 @@ export class MediaBridge {
     return this.call.waitForCallee === true && !this.greetingSent;
   }
 
-  private onGrokResponseCreated(): void {
+  private onGrokResponseCreated(event: JsonObject): void {
+    const responseId = responseIdFromEvent(event);
     if (!this.greetingSent) {
       this.cancelPendingGrokResponse(true);
       return;
@@ -325,7 +355,8 @@ export class MediaBridge {
       if (this.grokResponsePending) return;
       this.grokResponsePending = true;
       this.suppressAssistantAudio = false;
-      this.beginTurnAudio();
+      if (responseId) this.greetingResponseId = responseId;
+      if (!this.wantsElevenLabsPlayback()) this.beginTurnAudio();
       return;
     }
     if (this.suppressUntilNextCalleeSpeech) {
@@ -334,24 +365,52 @@ export class MediaBridge {
     }
     this.grokResponsePending = true;
     this.suppressAssistantAudio = false;
-    this.beginTurnAudio();
+    if (this.wantsElevenLabsPlayback()) {
+      this.elExpectingUtterance = true;
+      this.turnAudio.done = false;
+    } else {
+      this.beginTurnAudio();
+    }
   }
 
-  private onGrokResponseDone(): void {
+  private onGrokResponseDone(event: JsonObject): void {
     this.grokResponsePending = false;
-    this.turnAudio.done = true;
-    this.flushResponseDoneWaiters();
+    if (this.wantsElevenLabsPlayback()) {
+      if (!this.elevenLabsTts) {
+        this.elExpectingUtterance = false;
+        this.turnAudio.done = true;
+        this.flushResponseDoneWaiters();
+      } else if (this.elExpectingUtterance && !this.elInFlight) {
+        const leftover = assistantTextFromResponse(event);
+        if (leftover) {
+          this.maybeSpeakAssistantText(leftover, responseIdFromEvent(event));
+        } else {
+          this.elExpectingUtterance = false;
+          this.turnAudio.done = true;
+          this.flushResponseDoneWaiters();
+        }
+      } else if (!this.elInFlight) {
+        this.turnAudio.done = true;
+        this.flushResponseDoneWaiters();
+      }
+    } else {
+      this.turnAudio.done = true;
+      this.flushResponseDoneWaiters();
+    }
     if (!this.greetingPlaying) return;
-    this.greetingPlaying = false;
-    this.configureGrokSession();
+    this.greetingGrokDone = true;
+    this.maybeFinishGreetingPlayback();
   }
 
   private bargeIn(): void {
     this.suppressUntilNextCalleeSpeech = false;
     this.sendTelnyx({ event: "clear" });
     this.cancelPendingGrokResponse(true);
+    this.abortElevenLabsPlayback();
     if (this.greetingPlaying) {
       this.greetingPlaying = false;
+      this.greetingElDone = true;
+      this.greetingGrokDone = true;
       this.configureGrokSession();
     }
   }
@@ -364,6 +423,7 @@ export class MediaBridge {
   }
 
   private forwardGrokAudio(event: JsonObject): void {
+    if (this.wantsElevenLabsPlayback()) return;
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     if (this.suppressAssistantAudio) return;
@@ -395,7 +455,7 @@ export class MediaBridge {
 
   private async waitForGoodbyePlayout(): Promise<void> {
     const deadline = this.clockMs() + this.hangupMaxWaitMs;
-    if (this.grokResponsePending || !this.turnAudio.done) {
+    if (!this.goodbyePlayoutReady()) {
       await this.waitForResponseDone(Math.max(0, deadline - this.clockMs()));
     }
     const waitMs = Math.min(
@@ -406,7 +466,7 @@ export class MediaBridge {
   }
 
   private waitForResponseDone(timeoutMs: number): Promise<void> {
-    if (!this.grokResponsePending && this.turnAudio.done) return Promise.resolve();
+    if (this.goodbyePlayoutReady()) return Promise.resolve();
     if (timeoutMs <= 0) return Promise.resolve();
     return new Promise((resolve) => {
       let finish: () => void = () => undefined;
@@ -422,7 +482,107 @@ export class MediaBridge {
     });
   }
 
+  private goodbyePlayoutReady(): boolean {
+    if (this.grokResponsePending) return false;
+    if (!this.turnAudio.done) return false;
+    if (this.elInFlight || this.elExpectingUtterance) return false;
+    return true;
+  }
+
+  /** Telnyx must hear ElevenLabs, never Grok ara, when this call requested elevenlabs. */
+  private wantsElevenLabsPlayback(): boolean {
+    return this.call.ttsProvider === "elevenlabs";
+  }
+
+  private abortElevenLabsPlayback(): void {
+    this.elGeneration += 1;
+    this.elAbort?.abort();
+    this.elAbort = undefined;
+    this.elInFlight = false;
+    this.elExpectingUtterance = false;
+    if (this.wantsElevenLabsPlayback()) {
+      this.turnAudio.done = true;
+    }
+    this.flushResponseDoneWaiters();
+  }
+
+  private maybeFinishGreetingPlayback(): void {
+    if (!this.greetingPlaying) return;
+    if (!this.greetingGrokDone || !this.greetingElDone) return;
+    this.greetingPlaying = false;
+    this.configureGrokSession();
+  }
+
+  private maybeSpeakAssistantText(text: string, responseId: string): void {
+    if (!this.wantsElevenLabsPlayback()) return;
+    if (!this.elevenLabsTts) {
+      this.elExpectingUtterance = false;
+      this.turnAudio.done = true;
+      this.flushResponseDoneWaiters();
+      return;
+    }
+    if (this.isWaitingForCalleeSpeech()) return;
+    if (!this.greetingSent) return;
+    if (this.greetingPlaying) return;
+    if (this.suppressAssistantAudio) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (responseId && (responseId === this.greetingResponseId || this.elSpokenResponseIds.has(responseId))) {
+      return;
+    }
+    if (trimmed === this.call.greeting || trimmed === this.lastElSpokenText) return;
+    void this.playElevenLabs(trimmed, { responseId });
+  }
+
+  private async playElevenLabs(
+    text: string,
+    opts: { isGreeting?: boolean; responseId?: string } = {},
+  ): Promise<void> {
+    if (!this.elevenLabsTts) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const generation = this.elGeneration + 1;
+    this.elGeneration = generation;
+    this.elAbort?.abort();
+    const abort = new AbortController();
+    this.elAbort = abort;
+    this.elInFlight = true;
+    this.elExpectingUtterance = false;
+    this.beginTurnAudio();
+    if (opts.responseId) this.elSpokenResponseIds.add(opts.responseId);
+    this.lastElSpokenText = trimmed;
+    try {
+      for await (const chunk of this.elevenLabsTts.speakToPcmu({
+        text: trimmed,
+        language: this.call.language,
+        signal: abort.signal,
+      })) {
+        if (generation !== this.elGeneration || abort.signal.aborted || this.suppressAssistantAudio) {
+          return;
+        }
+        if (chunk.length > 0) {
+          this.noteTurnAudio(chunk);
+          this.sendTelnyx({ event: "media", media: { payload: chunk } });
+        }
+      }
+    } catch (err) {
+      if (abort.signal.aborted || (err instanceof Error && err.name === "AbortError")) return;
+      console.error(`[bridge ${this.call.id}] elevenlabs tts`, err);
+    } finally {
+      if (generation === this.elGeneration) {
+        this.elInFlight = false;
+        this.turnAudio.done = true;
+        this.flushResponseDoneWaiters();
+        if (opts.isGreeting === true || this.greetingPlaying) {
+          this.greetingElDone = true;
+          this.maybeFinishGreetingPlayback();
+        }
+      }
+    }
+  }
+
   private flushResponseDoneWaiters(): void {
+    if (!this.goodbyePlayoutReady()) return;
     const waiters = this.responseDoneWaiters.splice(0);
     for (const waiter of waiters) waiter();
   }
@@ -491,6 +651,41 @@ function vadAudioDurationMs(event: JsonObject): number | undefined {
   const end = asFiniteNumber(event.audio_end_ms);
   if (start === undefined || end === undefined || end < start) return undefined;
   return end - start;
+}
+
+function assistantTextFromEvent(event: JsonObject): string {
+  if (typeof event.transcript === "string" && event.transcript.trim()) return event.transcript.trim();
+  if (typeof event.text === "string" && event.text.trim()) return event.text.trim();
+  return "";
+}
+
+function assistantTextFromResponse(event: JsonObject): string {
+  const response = event.response as JsonObject | undefined;
+  const output = response?.output;
+  if (!Array.isArray(output)) return "";
+  const parts: string[] = [];
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = (item as JsonObject).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const piece = part as JsonObject;
+      if (typeof piece.transcript === "string" && piece.transcript.trim()) {
+        parts.push(piece.transcript.trim());
+      } else if (typeof piece.text === "string" && piece.text.trim()) {
+        parts.push(piece.text.trim());
+      }
+    }
+  }
+  return parts.join(" ").trim();
+}
+
+function responseIdFromEvent(event: JsonObject): string {
+  if (typeof event.response_id === "string" && event.response_id) return event.response_id;
+  const response = event.response as JsonObject | undefined;
+  if (typeof response?.id === "string" && response.id) return response.id;
+  return "";
 }
 
 function asFiniteNumber(value: unknown): number | undefined {

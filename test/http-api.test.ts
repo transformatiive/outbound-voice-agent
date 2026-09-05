@@ -71,7 +71,7 @@ describe("HTTP API", () => {
     expect(res.body.tts).toEqual({
       default: "grok",
       grokVoice: "ara",
-      elevenlabs: { configured: false, model: "eleven_v3", voiceId: "" },
+      elevenlabs: { configured: false, audioPathActive: false, model: "eleven_v3", voiceId: "" },
     });
     expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
   });
@@ -383,7 +383,31 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(telnyx.dial).not.toHaveBeenCalled();
   });
 
-  it("accepts tts_provider=elevenlabs when configured but still dials with Grok voice ara", async () => {
+  it("GET /health reports ElevenLabs audio path active when the key is configured", async () => {
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezLnCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app } = createApp({ config: withLabs, telnyx });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body.tts.elevenlabs).toEqual({
+      configured: true,
+      audioPathActive: true,
+      model: "eleven_v3",
+      voiceId: "NkpT2jezLnCDRKHkWiX",
+    });
+    expect(res.body.ready.elevenlabs).toBe(true);
+    expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
+  });
+
+  it("accepts tts_provider=elevenlabs when configured; Grok voice stays ara for STT", async () => {
     const withLabs = {
       ...config,
       elevenlabs: {
@@ -424,6 +448,71 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(got.body.greeting).toMatch(/Fala a secretária da empresa/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
     expect(got.body.voice).toBe("ara");
+  });
+
+  it("swapping only tts_provider keeps the same dial, persona, roles, and pt-PT fields", async () => {
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezLnCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app } = createApp({ config: withLabs, telnyx });
+    const body = {
+      to: "+351912345678",
+      language: "pt-PT",
+      persona: "secretária da empresa",
+      objective: "Reservar uma mesa para 2 hoje à noite.",
+      waitForCallee: true,
+      bot_role: "caller_booking",
+      callee_role: "venue_staff",
+    };
+    const grok = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, tts_provider: "grok" });
+    const el = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, tts_provider: "elevenlabs" });
+    expect(grok.status).toBe(201);
+    expect(el.status).toBe(201);
+    expect(grok.body.ttsProvider).toBe("grok");
+    expect(el.body.ttsProvider).toBe("elevenlabs");
+    expect(el.body.language).toBe("pt-PT");
+    expect(el.body.language).toBe(grok.body.language);
+    expect(el.body.botRole).toBe(grok.body.botRole);
+    expect(el.body.calleeRole).toBe(grok.body.calleeRole);
+    expect(el.body.to).toBe(grok.body.to);
+    expect(el.body.waitForCallee).toBe(true);
+    expect(el.body.voice).toBe("ara");
+    expect(grok.body.voice).toBe("ara");
+
+    const grokCall = await request(app)
+      .get(`/api/calls/${grok.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    const elCall = await request(app)
+      .get(`/api/calls/${el.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(elCall.body.greeting).toBe(grokCall.body.greeting);
+    expect(elCall.body.persona).toBe(grokCall.body.persona);
+    expect(elCall.body.objective).toBe(grokCall.body.objective);
+    expect(elCall.body.greeting).toMatch(/Fala a secretária da empresa/);
+
+    expect(telnyx.dial).toHaveBeenCalledTimes(2);
+    const grokDial = vi.mocked(telnyx.dial).mock.calls[0]?.[0];
+    const elDial = vi.mocked(telnyx.dial).mock.calls[1]?.[0];
+    expect(elDial?.connection_id).toBe(grokDial?.connection_id);
+    expect(elDial?.to).toBe(grokDial?.to);
+    expect(elDial?.from).toBe(grokDial?.from);
+    expect(elDial?.stream_bidirectional_codec).toBe("PCMU");
+    expect(elDial?.stream_bidirectional_codec).toBe(grokDial?.stream_bidirectional_codec);
+    expect(elDial?.stream_bidirectional_mode).toBe(grokDial?.stream_bidirectional_mode);
+    expect(elDial?.webhook_url).toBe(grokDial?.webhook_url);
   });
 
   it("defaults tts_provider grok and echoes roles on POST /api/outbound", async () => {

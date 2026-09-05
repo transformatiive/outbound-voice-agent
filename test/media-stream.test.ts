@@ -280,4 +280,132 @@ describe("media stream websocket", () => {
       grokWss.close();
     }
   });
+
+  it("plays ElevenLabs PCMU to Telnyx when tts_provider=elevenlabs and drops Grok audio", async () => {
+    const grokWss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const grokPort = await new Promise<number>((resolve) => {
+      grokWss.once("listening", () => resolve((grokWss.address() as AddressInfo).port));
+    });
+
+    const grokFromApp: JsonObject[] = [];
+    const grokConnection = new Promise<WebSocket>((resolve) => {
+      grokWss.once("connection", (ws) => {
+        ws.on("message", (data) => {
+          grokFromApp.push(JSON.parse(String(data)) as JsonObject);
+        });
+        resolve(ws);
+      });
+    });
+
+    const elPcmu = Buffer.alloc(160, 0xab);
+    const elCalls: { url: string; body: string }[] = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      elCalls.push({ url: String(url), body: String(init?.body ?? "") });
+      return new Response(elPcmu, { status: 200 });
+    };
+
+    const telnyx: TelnyxClient = {
+      dial: vi.fn(async () => ({
+        call_control_id: "v2:control-id",
+        call_leg_id: "leg-id",
+        call_session_id: "session-id",
+        is_alive: false,
+        record_type: "call",
+      })),
+      hangup: vi.fn(async () => undefined),
+    };
+
+    const withLabs: AppConfig = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezLnCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+
+    const { app, store, attach } = createApp({
+      config: withLabs,
+      telnyx,
+      connectGrok: () => new WebSocket(`ws://127.0.0.1:${grokPort}`),
+      fetchImpl,
+    });
+    const httpServer = createServer(app);
+    attach(httpServer);
+    const port = await listen(httpServer);
+
+    try {
+      const created = await request(app)
+        .post("/api/outbound")
+        .set("Authorization", "Bearer test-api-key")
+        .send({
+          to: "+351912345678",
+          language: "pt-PT",
+          greeting: "Olá, fala a secretária.",
+          objective: "Confirmar quinta",
+          tts_provider: "elevenlabs",
+        });
+      const call = store.get(created.body.id as string);
+      if (!call) throw new Error("call missing");
+      expect(call.ttsProvider).toBe("elevenlabs");
+
+      const telnyxFromGrok: JsonObject[] = [];
+      const telnyxWs = new WebSocket(
+        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
+      );
+      telnyxWs.on("message", (data) => {
+        telnyxFromGrok.push(JSON.parse(String(data)) as JsonObject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        telnyxWs.once("open", () => resolve());
+        telnyxWs.once("error", reject);
+      });
+
+      const grokWs = await grokConnection;
+      await waitFor(grokFromApp, (m) => m.type === "session.update");
+      grokWs.send(JSON.stringify({ type: "session.updated" }));
+      await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
+
+      const greetingMedia = await waitFor(telnyxFromGrok, (m) => m.event === "media");
+      expect(greetingMedia).toEqual({
+        event: "media",
+        media: { payload: elPcmu.toString("base64") },
+      });
+      expect(elCalls[0]?.url).toContain("NkpT2jezLnCDRKHkWiX");
+      expect(elCalls[0]?.url).toContain("output_format=ulaw_8000");
+      expect(elCalls[0]?.body).toContain(call.greeting);
+
+      grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
+      grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "GROKAUDIO" }));
+      grokWs.send(JSON.stringify({ type: "response.done" }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(telnyxFromGrok.filter((m) => m.event === "media")).toHaveLength(1);
+
+      grokWs.send(JSON.stringify({ type: "response.created", response_id: "turn-1" }));
+      grokWs.send(
+        JSON.stringify({
+          type: "response.output_audio_transcript.done",
+          response_id: "turn-1",
+          transcript: "Perfeito, às 18h.",
+        }),
+      );
+      const turnMedia = await waitFor(
+        telnyxFromGrok,
+        (m) => m.event === "media" && telnyxFromGrok.filter((x) => x.event === "media").length >= 2,
+      );
+      expect(turnMedia).toEqual({
+        event: "media",
+        media: { payload: elPcmu.toString("base64") },
+      });
+      expect(elCalls.some((c) => c.body.includes("Perfeito, às 18h."))).toBe(true);
+
+      telnyxWs.close();
+      grokWs.close();
+    } finally {
+      httpServer.close();
+      grokWss.close();
+    }
+  });
 });
