@@ -4,6 +4,9 @@ import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./gree
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
 import { parseTtsProvider, type TtsProvider } from "./tts.js";
+import { createElevenLabsTts } from "./elevenlabs.js";
+import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
+import type { ElevenLabsTts } from "./elevenlabs.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -166,6 +169,11 @@ export async function placeOutboundCall(opts: {
   telnyx: TelnyxClient;
   store: CallStore;
   body: OutboundBody;
+  fetchImpl?: typeof fetch;
+  greetingAudioCache?: GreetingAudioCache;
+  elevenLabsTts?: ElevenLabsTts;
+  onCallCreated?: (call: CallRecord) => void;
+  onDialFailed?: (call: CallRecord) => void;
 }): Promise<{ call: CallRecord } | { error: OutboundError }> {
   if (!opts.config.ready.outbound) {
     return { error: { status: 503, error: "outbound_not_ready", details: opts.config.ready } };
@@ -215,6 +223,26 @@ export async function placeOutboundCall(opts: {
     ...(parsed.value.metadata ? { metadata: parsed.value.metadata } : {}),
   };
   opts.store.create(call);
+  opts.onCallCreated?.(call);
+
+  if (
+    call.ttsProvider === "elevenlabs" &&
+    opts.config.elevenlabs.configured &&
+    opts.greetingAudioCache
+  ) {
+    const tts = opts.elevenLabsTts ?? createElevenLabsTts(opts.config.elevenlabs, opts.fetchImpl ?? fetch);
+    console.info(`[call ${call.id}] el_latency stage=prefetch_start turn=greeting source=dial`);
+    opts.greetingAudioCache.startIfNeeded({
+      callId: call.id,
+      text: call.greeting,
+      language: call.language,
+      tts,
+      onHttpStart: () =>
+        console.info(`[call ${call.id}] el_latency stage=el_http_start turn=greeting source=dial`),
+      onFirstByte: () =>
+        console.info(`[call ${call.id}] el_latency stage=el_first_byte turn=greeting source=dial`),
+    });
+  }
 
   try {
     const dialed = await opts.telnyx.dial({
@@ -234,6 +262,8 @@ export async function placeOutboundCall(opts: {
     call.telnyx.callSessionId = dialed.call_session_id;
     return { call };
   } catch (err) {
+    opts.greetingAudioCache?.abort(call.id);
+    opts.onDialFailed?.(call);
     call.status = "failed";
     call.endedReason = "dial_failed";
     call.endedAt = new Date().toISOString();

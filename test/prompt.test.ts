@@ -49,6 +49,7 @@ describe("prompt / language", () => {
     expect(text).not.toMatch(/American English/i);
     expect(text).toMatch(/pessoa ao telefone/);
     expect(text).toMatch(/Responde no instante/);
+    expect(text).toMatch(/sem espera extra/);
     expect(text).toMatch(/NUNCA inventes factos/);
     expect(text).toMatch(/número de pessoas/);
     expect(text).toMatch(/calorosa/);
@@ -76,6 +77,7 @@ describe("prompt / language", () => {
     expect(gb).toMatch(/end_call/);
     expect(us).toMatch(/end_call/);
     expect(gb).toMatch(/Answer the instant the callee finishes/);
+    expect(gb).toMatch(/no extra wait/);
     expect(us).toMatch(/person on a live phone call/);
     expect(gb).toMatch(/NEVER invent facts/);
     expect(us).toMatch(/headcount/);
@@ -230,6 +232,7 @@ describe("prompt / language", () => {
         expect(text).toMatch(/não a parafraseies/i);
         expect(text).toMatch(/Empatia breve/);
         expect(text).toMatch(/Responde no instante/);
+        expect(text).toMatch(/sem espera extra/);
         expect(text).toMatch(/NUNCA inventes factos/);
         expect(text).toMatch(/número de pessoas/);
         expect(text).toMatch(/preços/);
@@ -244,6 +247,7 @@ describe("prompt / language", () => {
         expect(text).toMatch(/paraphrase it/);
         expect(text).toMatch(/Brief empathy/);
         expect(text).toMatch(/Answer the instant/);
+        expect(text).toMatch(/no extra wait/);
         expect(text).toMatch(/NEVER invent facts/);
         expect(text).toMatch(/headcount/);
         expect(text).toMatch(/prices/);
