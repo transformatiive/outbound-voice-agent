@@ -44,7 +44,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 `language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `pt-PT` is European Portuguese only — never Brazilian (`pt-BR`), including vocabulary and greeting patterns («Oi», «Tudo bem?», «bem-vindo ao restaurante»).
 
-`tts_provider` is optional: `grok` | `elevenlabs` (default `grok`). Grok voice stays **`ara`**. `elevenlabs` is dual-ready: if `ELEVENLABS_API_KEY` or `ELEVENLABS_VOICE_ID` is missing, the API returns **503 `elevenlabs_not_configured`**. When both are set the call is accepted but audio still goes through Grok until the ElevenLabs pipeline is wired.
+`tts_provider` is optional: `grok` | `elevenlabs` (default `grok`). Grok voice stays **`ara`**. `elevenlabs` is dual-ready: Developer sets `ELEVENLABS_API_KEY` on Railway (secret, never in git). Voice id defaults to the IVC clone `tnL8F53kfXcNNVSwbLzy`; model defaults to `eleven_v3` (not the vault’s `multilingual_v2`). If the API key is unset, `tts_provider=elevenlabs` returns **503 `elevenlabs_not_configured`**. When the key is present, `ready.elevenlabs` is true and the call is accepted; audio still goes through Grok until the ElevenLabs pipeline is wired.
 
 `bot_role` (default `caller_booking`) and `callee_role` (default `venue_staff`) are optional labels. The bot **always** placed the call and requests the booking. The callee answered (venue staff / reception). The bot never welcomes as the restaurant and never offers tables as the house.
 

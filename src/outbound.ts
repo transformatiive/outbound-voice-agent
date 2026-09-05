@@ -176,7 +176,7 @@ export async function placeOutboundCall(opts: {
       error: {
         status: 503,
         error: "elevenlabs_not_configured",
-        details: "ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID are required for tts_provider=elevenlabs",
+        details: "ELEVENLABS_API_KEY is required for tts_provider=elevenlabs (set on Railway)",
       },
     };
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
+import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID } from "../src/tts.js";
 
 describe("config", () => {
   it("defaults caller ID, Grok voice ara, Live 2 model, and Telnyx app/OVP ids", () => {
@@ -27,11 +28,13 @@ describe("config", () => {
     expect(cfg.hangupPlayoutBufferMs).toBe(1000);
     expect(cfg.elevenlabs).toEqual({
       apiKey: "",
-      voiceId: "",
-      model: "eleven_v3",
+      voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+      model: DEFAULT_ELEVENLABS_MODEL,
       configured: false,
     });
     expect(cfg.ready.elevenlabs).toBe(false);
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("tnL8F53kfXcNNVSwbLzy");
+    expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
   });
 
   it("honors GROK_VAD_* env overrides and clamps them", () => {
@@ -91,38 +94,39 @@ describe("config", () => {
     expect(cfg.ready.outbound).toBe(false);
   });
 
-  it("marks ElevenLabs ready only when API key and voice id are both set", () => {
-    const missingVoice = loadConfig({
+  it("marks ElevenLabs ready when ELEVENLABS_API_KEY is set (voice id defaults to IVC clone)", () => {
+    const withKey = loadConfig({
       API_KEY: "k",
       TELNYX_API_KEY: "t",
       XAI_API_KEY: "x",
       PUBLIC_BASE_URL: "https://example.up.railway.app",
       ELEVENLABS_API_KEY: "el-key",
     });
-    expect(missingVoice.elevenlabs.configured).toBe(false);
-    expect(missingVoice.ready.elevenlabs).toBe(false);
-    expect(missingVoice.elevenlabs.model).toBe("eleven_v3");
-    expect(missingVoice.grokVoice).toBe("ara");
-    expect(missingVoice.grokVoiceSpeed).toBe(1.05);
+    expect(withKey.elevenlabs.configured).toBe(true);
+    expect(withKey.ready.elevenlabs).toBe(true);
+    expect(withKey.elevenlabs.voiceId).toBe(DEFAULT_ELEVENLABS_VOICE_ID);
+    expect(withKey.elevenlabs.model).toBe(DEFAULT_ELEVENLABS_MODEL);
+    expect(withKey.grokVoice).toBe("ara");
+    expect(withKey.grokVoiceSpeed).toBe(1.05);
 
-    const ready = loadConfig({
+    const overridden = loadConfig({
       API_KEY: "k",
       TELNYX_API_KEY: "t",
       XAI_API_KEY: "x",
       PUBLIC_BASE_URL: "https://example.up.railway.app",
       ELEVENLABS_API_KEY: "el-key",
       ELEVENLABS_VOICE_ID: "el-voice",
-      ELEVENLABS_MODEL: "eleven_v3",
+      ELEVENLABS_MODEL: "multilingual_v2",
     });
-    expect(ready.elevenlabs).toEqual({
+    expect(overridden.elevenlabs).toEqual({
       apiKey: "el-key",
       voiceId: "el-voice",
-      model: "eleven_v3",
+      model: "multilingual_v2",
       configured: true,
     });
-    expect(ready.ready.elevenlabs).toBe(true);
-    expect(ready.grokVoice).toBe("ara");
-    expect(ready.grokVoiceSpeed).toBe(1.05);
+    expect(overridden.ready.elevenlabs).toBe(true);
+    expect(overridden.grokVoice).toBe("ara");
+    expect(overridden.grokVoiceSpeed).toBe(1.05);
   });
 
   it("builds webhook and media stream URLs from PUBLIC_BASE_URL", () => {

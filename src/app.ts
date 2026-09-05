@@ -70,6 +70,7 @@ export function createApp(deps: AppDeps): CreatedApp {
         elevenlabs: {
           configured: deps.config.elevenlabs.configured,
           model: deps.config.elevenlabs.model,
+          voiceId: deps.config.elevenlabs.voiceId,
         },
       },
       telnyx: {

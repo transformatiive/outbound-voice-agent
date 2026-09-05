@@ -67,6 +67,13 @@ describe("HTTP API", () => {
     expect(res.body.telnyx.outboundVoiceProfileId).toBe("3041732644774610184");
     expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
     expect(res.body.ready.outbound).toBe(true);
+    expect(res.body.ready.elevenlabs).toBe(false);
+    expect(res.body.tts).toEqual({
+      default: "grok",
+      grokVoice: "ara",
+      elevenlabs: { configured: false, model: "eleven_v3", voiceId: "" },
+    });
+    expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
   });
 
   it("rejects outbound without Bearer API_KEY", async () => {
@@ -372,6 +379,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       });
     expect(res.status).toBe(503);
     expect(res.body.error).toBe("elevenlabs_not_configured");
+    expect(res.body.details).toMatch(/ELEVENLABS_API_KEY/);
     expect(telnyx.dial).not.toHaveBeenCalled();
   });
 
