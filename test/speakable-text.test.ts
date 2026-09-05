@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { takeCompleteSentences } from "../src/bridge/speakable-text.js";
+import { firstSentenceAndRest, takeCompleteSentences } from "../src/bridge/speakable-text.js";
 
 describe("takeCompleteSentences", () => {
   it("holds text until a sentence boundary", () => {
@@ -19,6 +19,18 @@ describe("takeCompleteSentences", () => {
   it("releases every finished sentence including a terminal one", () => {
     expect(takeCompleteSentences("Certo. Perfeito, às 18h.")).toEqual({
       complete: ["Certo.", "Perfeito, às 18h."],
+      rest: "",
+    });
+  });
+
+  it("splits the first sentence from the remaining spoken tail", () => {
+    expect(firstSentenceAndRest("Perfeito. Mesa para as 18h.")).toEqual({
+      first: "Perfeito.",
+      rest: "Mesa para as 18h.",
+    });
+    expect(firstSentenceAndRest("Certo.")).toEqual({ first: "Certo.", rest: "" });
+    expect(firstSentenceAndRest("Mesa para as 18h")).toEqual({
+      first: "Mesa para as 18h",
       rest: "",
     });
   });

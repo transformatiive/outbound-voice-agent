@@ -17,6 +17,7 @@ import { LANGUAGES } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
 import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
+import { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
 
@@ -37,6 +38,7 @@ export type CreatedApp = {
 export function createApp(deps: AppDeps): CreatedApp {
   const store = deps.store ?? new CallStore();
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const greetingAudioCache = new GreetingAudioCache();
   const notified = new Set<string>();
 
   const onCallEnded = (call: CallRecord) => {
@@ -129,6 +131,8 @@ export function createApp(deps: AppDeps): CreatedApp {
       telnyx: deps.telnyx,
       store,
       body: req.body as Record<string, unknown>,
+      fetchImpl,
+      greetingAudioCache,
     });
     if ("error" in result) {
       res.status(result.error.status).json(result.error);
@@ -166,6 +170,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       store,
       telnyx: deps.telnyx,
       onCallEnded,
+      greetingAudioCache,
       ...(deps.connectGrok ? { connectGrok: deps.connectGrok } : {}),
       ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
     });

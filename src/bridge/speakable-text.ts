@@ -20,6 +20,17 @@ export function takeCompleteSentences(buffer: string): { complete: string[]; res
   return { complete: head, rest: last };
 }
 
+/** First finished sentence vs the remainder (later sentences + trailing fragment). */
+export function firstSentenceAndRest(text: string): { first: string; rest: string } {
+  const trimmed = text.trim();
+  if (!trimmed) return { first: "", rest: "" };
+  const { complete, rest } = takeCompleteSentences(trimmed);
+  if (complete.length === 0) return { first: trimmed, rest: "" };
+  const first = complete[0] ?? "";
+  const tail = [...complete.slice(1), rest].filter(Boolean).join(" ");
+  return { first, rest: tail };
+}
+
 /** Text in `full` that has not already been spoken as `spoken` (prefix match). */
 export function remainingUnspoken(full: string, spoken: string): string {
   const f = full.trim();

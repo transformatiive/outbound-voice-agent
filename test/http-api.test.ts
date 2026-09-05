@@ -419,7 +419,11 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       },
       ready: { ...config.ready, elevenlabs: true },
     };
-    const { app } = createApp({ config: withLabs, telnyx });
+    const { app } = createApp({
+      config: withLabs,
+      telnyx,
+      fetchImpl: async () => new Response(Buffer.alloc(160, 0x7f), { status: 200 }),
+    });
     const res = await request(app)
       .post("/api/outbound")
       .set("Authorization", "Bearer test-api-key")
@@ -451,6 +455,45 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(got.body.voice).toBe("ara");
   });
 
+  it("starts ElevenLabs greeting TTS at dial and does not wait for unlock or media stream", async () => {
+    const elPcmu = Buffer.alloc(160, 0x7f);
+    const elCalls: { url: string; body: string }[] = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      elCalls.push({ url: String(url), body: String(init?.body ?? "") });
+      return new Response(elPcmu, { status: 200 });
+    };
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezTenCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app, store } = createApp({ config: withLabs, telnyx, fetchImpl });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        greeting: "Olá, fala a secretária.",
+        objective: "Confirmar quinta",
+        tts_provider: "elevenlabs",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    const call = store.get(res.body.id as string);
+    if (!call) throw new Error("call missing");
+    for (let i = 0; i < 20 && elCalls.length === 0; i++) await Promise.resolve();
+    expect(elCalls.length).toBeGreaterThanOrEqual(1);
+    expect(elCalls[0]?.url).toContain("NkpT2jezTenCDRKHkWiX");
+    expect(elCalls[0]?.body).toContain(call.greeting);
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+  });
+
   it("swapping only tts_provider keeps the same dial, persona, roles, and pt-PT fields", async () => {
     const withLabs = {
       ...config,
@@ -462,7 +505,11 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       },
       ready: { ...config.ready, elevenlabs: true },
     };
-    const { app } = createApp({ config: withLabs, telnyx });
+    const { app } = createApp({
+      config: withLabs,
+      telnyx,
+      fetchImpl: async () => new Response(Buffer.alloc(160, 0x7f), { status: 200 }),
+    });
     const body = {
       to: "+351912345678",
       language: "pt-PT",
