@@ -2,6 +2,7 @@ import type { Language } from "./prompt.js";
 
 export const DEFAULT_TIMEZONE = "Europe/Lisbon";
 export const MAX_SPOKEN_ASK_CHARS = 140;
+export const MAX_IDENTITY_CHARS = 90;
 
 const TIME_PHRASE =
   /\b(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\b/i;
@@ -13,8 +14,9 @@ const LEADING_TIME =
 const SPOKEN_ASK_VERB =
   /^(confirmar|confirma|pedir|peça|marcar|agendar|ligar|ligo|queria|quero|gostaria|preciso|reservar|chamo|confirm|please|i\b|we\b|calling|call|ask)\b/i;
 
+/** True spoken identity openings — not «Fala português…» instruction lines. */
 const IDENTITY_ALREADY_SPOKEN =
-  /^(olá|ola|hello|fala|falo|ligo|sou|this is|i'm calling|i am calling|im calling|calling)(?:\b|[\s,.!?]|$)/i;
+  /^(olá|ola|hello|fala a|fala o|falo a|falo da|ligo da|ligo para|sou a|sou o|this is|i'm calling|i am calling|im calling|calling from)(?:\b|[\s,.!?]|$)/i;
 
 const SCRIPT_LINE_LABEL =
   /^(roleplay|role\b|objetivo|objective|instructions?|system\b|prompt\b|persona\b|regras?\b|rules?\b|contexto\b|context\b|cenario|cenário|scenario)\s*[:\-–]/i;
@@ -84,9 +86,9 @@ export function looksLikeVenueWelcome(text: string): boolean {
 }
 
 /**
- * Spoken force_message text only: Olá/Hello + time-of-day + caller identity + a short
- * natural ask. Never dumps ROLEPLAY, system instructions, markdown, or the raw objective.
- * Never greets as the restaurant («bem-vindo ao restaurante»).
+ * Spoken force_message text only: Olá/Hello + time-of-day + one short caller identity
+ * clause + a short natural ask. Never dumps ROLEPLAY, system instructions, markdown,
+ * or the raw objective. Never greets as the restaurant («bem-vindo ao restaurante»).
  */
 export function composeSpokenGreeting(input: {
   language: Language;
@@ -102,11 +104,13 @@ export function composeSpokenGreeting(input: {
   const timeGreeting = timeOfDayGreeting(input.language, timezone, now);
   const hello = helloWord(input.language);
   const opening = `${hello}, ${lowerFirst(timeGreeting)}.`;
-  const persona = spokenIdentity(input.language, input.persona ?? input.greeting ?? "");
+  const identitySource = identitySourceText(input);
+  const persona = spokenIdentity(input.language, identitySource);
   const ask = spokenAskFromObjective({
     language: input.language,
     objective: input.objective,
     ...(input.spokenAsk !== undefined ? { spokenAsk: input.spokenAsk } : {}),
+    fallbackText: identitySource,
   });
 
   let spoken: string;
@@ -131,10 +135,31 @@ export function composeSpokenGreeting(input: {
   return assertNaturalSpeech(spoken);
 }
 
+function identitySourceText(input: {
+  persona?: string;
+  greeting?: string;
+  objective: string;
+  spokenAsk?: string;
+}): string {
+  const personaRaw = input.persona?.trim() ?? "";
+  const greetingRaw = input.greeting?.trim() ?? "";
+  if (personaRaw) return personaRaw;
+  if (!greetingRaw) return "";
+  const greetingDump = looksLikeInstructionDump(greetingRaw);
+  const canComposeWithoutGreeting =
+    Boolean(input.spokenAsk?.trim()) || Boolean(extractSpokenAskProse(input.objective));
+  if (greetingDump && canComposeWithoutGreeting) {
+    const extracted = extractIdentityClause(greetingRaw);
+    return extracted;
+  }
+  return greetingRaw;
+}
+
 function spokenIdentity(language: Language, raw: string): string {
   const cleaned = sanitizePersona(raw);
   if (!cleaned || looksLikeVenueWelcome(cleaned)) return defaultCallerIdentity(language);
-  if (IDENTITY_ALREADY_SPOKEN.test(cleaned)) return cleaned;
+  const clause = stripLeadingTime(stripLeadingHello(cleaned)) || cleaned;
+  if (IDENTITY_ALREADY_SPOKEN.test(clause)) return clause;
   switch (language) {
     case "pt-PT": {
       const rest = /^[ao]s?\s+/i.test(cleaned) ? cleaned : `a ${lowerFirst(cleaned)}`;
@@ -154,13 +179,18 @@ export function spokenAskFromObjective(input: {
   language: Language;
   objective: string;
   spokenAsk?: string;
+  fallbackText?: string;
 }): string {
   const explicit = input.spokenAsk?.trim();
   if (explicit) {
-    const fromExplicit = toSpokenAsk(extractCleanProse(explicit), input.language);
+    const fromExplicit = toSpokenAsk(extractSpokenAskProse(explicit), input.language);
     if (fromExplicit && isCleanSpokenProse(fromExplicit)) return fromExplicit;
   }
-  return toSpokenAsk(extractCleanProse(input.objective), input.language);
+  const fromObjective = toSpokenAsk(extractSpokenAskProse(input.objective), input.language);
+  if (fromObjective) return fromObjective;
+  const fallback = input.fallbackText?.trim();
+  if (fallback) return toSpokenAsk(extractSpokenAskProse(fallback), input.language);
+  return "";
 }
 
 export function looksLikePromptScript(text: string): boolean {
@@ -179,6 +209,26 @@ export function looksLikePromptScript(text: string): boolean {
   }
   if (labeled > 0) return true;
   if (raw.length > 220 && /^\s*\d+\s*[).:-]\s+/m.test(raw) && /\n/.test(raw)) return true;
+  return false;
+}
+
+export function looksLikeInstructionDump(text: string): boolean {
+  const raw = text.trim();
+  if (!raw) return false;
+  if (looksLikePromptScript(raw)) return true;
+  const folded = stripDiacritics(raw).toLowerCase();
+  if (
+    /\bfala portugues/.test(folded) ||
+    /\bbrasileir/.test(folded) ||
+    /\btu ligas\b/.test(folded) ||
+    /\bnunca uses\b/.test(folded) ||
+    /\binstruc/.test(folded)
+  ) {
+    return true;
+  }
+  for (const sentence of splitRawSentences(raw)) {
+    if (looksLikeSystemRule(sentence)) return true;
+  }
   return false;
 }
 
@@ -209,34 +259,114 @@ function hourInTimeZone(now: Date, timeZone: string): number {
 function sanitizePersona(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return "";
-  if (!looksLikePromptScript(trimmed) && !trimmed.includes("\n") && !/\broleplay\b/i.test(trimmed)) {
-    return stripMarkdown(trimmed);
+  if (
+    looksLikeInstructionDump(trimmed) ||
+    looksLikePromptScript(trimmed) ||
+    trimmed.includes("\n") ||
+    splitRawSentences(trimmed).length > 1
+  ) {
+    return extractIdentityClause(trimmed);
   }
-  const extracted = extractCleanProse(trimmed, { allowLong: true });
-  if (!extracted || /\broleplay\b/i.test(extracted)) return "";
-  return extracted;
+  const one = firstSpokenSentence(stripMarkdown(trimmed));
+  if (!one || looksLikeSystemRule(one) || looksLikeVenueWelcome(one) || !isCleanSpokenProse(one)) {
+    return "";
+  }
+  return clipSpoken(one, MAX_IDENTITY_CHARS);
 }
 
-function extractCleanProse(text: string, opts: { allowLong?: boolean } = {}): string {
-  const raw = text.trim();
-  if (!raw) return "";
+function extractIdentityClause(text: string): string {
+  for (const sentence of spokenSentences(text)) {
+    const stripped = stripLeadingTime(stripLeadingHello(sentence));
+    if (!stripped) continue;
+    if (!isCleanSpokenProse(stripped)) continue;
+    if (looksLikeVenueWelcome(stripped)) continue;
+    if (looksLikeIdentityClause(stripped) || looksLikeIdentityClause(sentence)) {
+      return clipSpoken(firstSpokenSentence(stripped), MAX_IDENTITY_CHARS);
+    }
+  }
+  const mixed = text.match(/\b((?:sou|fala) a secret[aá]ria\b[^.!?\n]{0,80})/i);
+  const fromMixed = mixed?.[1]?.trim() ?? "";
+  if (fromMixed && !looksLikeSystemRule(fromMixed) && isCleanSpokenProse(fromMixed)) {
+    return clipSpoken(fromMixed, MAX_IDENTITY_CHARS);
+  }
+  return "";
+}
+
+function extractSpokenAskProse(text: string): string {
+  const askLike: string[] = [];
+  const other: string[] = [];
+  for (const sentence of spokenSentences(text)) {
+    if (!isCleanSpokenProse(sentence)) continue;
+    if (looksLikeIdentityClause(sentence) && !SPOKEN_ASK_VERB.test(sentence)) continue;
+    if (looksLikeIdentityClause(sentence) && /^(sou|fala a|fala o|falo|ligo da|this is)/i.test(sentence)) {
+      continue;
+    }
+    if (SPOKEN_ASK_VERB.test(sentence)) askLike.push(sentence);
+    else other.push(sentence);
+  }
+  const chosen = askLike[0] ?? other[0] ?? "";
+  if (!chosen) return "";
+  if (chosen.length > MAX_SPOKEN_ASK_CHARS) return clipSpoken(chosen, MAX_SPOKEN_ASK_CHARS);
+  return chosen;
+}
+
+function spokenSentences(text: string): string[] {
   const parts: string[] = [];
-  for (const line of raw.split(/\n/)) {
+  for (const line of text.split(/\n/)) {
     const unwrapped = unwrapScriptLine(line);
     if (unwrapped === undefined) continue;
     const cleaned = stripMarkdown(unwrapped);
     if (!cleaned) continue;
-    if (!isCleanSpokenProse(cleaned)) continue;
-    parts.push(cleaned);
+    for (const sentence of splitRawSentences(cleaned)) {
+      const t = sentence.replace(/[.!?…]+$/u, "").trim();
+      if (t) parts.push(t);
+    }
   }
-  const joined = parts.join(" ").replace(/\s+/g, " ").trim();
-  if (!joined || /\broleplay\b/i.test(joined)) return "";
-  const sentence = firstSpokenSentence(joined);
-  if (!sentence) return "";
-  if (!opts.allowLong && sentence.length > MAX_SPOKEN_ASK_CHARS) {
-    return clipSpoken(sentence, MAX_SPOKEN_ASK_CHARS);
+  return parts;
+}
+
+function splitRawSentences(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .flatMap((line) => line.split(/(?<=[.!?…])\s+/))
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function looksLikeIdentityClause(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (IDENTITY_ALREADY_SPOKEN.test(t)) return true;
+  if (/\bcalling from\b/i.test(t)) return true;
+  if (/\bsecret[aá]ri/i.test(t) && t.length <= MAX_IDENTITY_CHARS + 24 && !SPOKEN_ASK_VERB.test(t)) {
+    return true;
   }
-  return sentence;
+  return false;
+}
+
+export function looksLikeSystemRule(text: string): boolean {
+  const raw = text.trim();
+  if (!raw) return false;
+  const t = stripDiacritics(raw).toLowerCase();
+  if (/\bnunca\b/.test(t) || /\bnever\b/.test(t)) return true;
+  if (/\bfala portugues/.test(t) || /\bspeak (european )?portuguese/.test(t)) return true;
+  if (/\binstruc/.test(t)) return true;
+  if (/\broleplay\b/.test(t)) return true;
+  if (/\btu ligas\b/.test(t) || /\byou (diall?ed|placed this call)\b/.test(t)) return true;
+  if (/\bbrasileir/.test(t)) return true;
+  if (/\buma ia\b/.test(t) || /\ban ai\b/.test(t) || /\bes uma ia\b/.test(t) || /\breveles que/.test(t)) {
+    return true;
+  }
+  if (/\bIA\b/.test(raw)) return true;
+  if (/\bgravad/.test(t) || /\b(being )?recorded\b/.test(t)) return true;
+  if (/\bAra\b/.test(raw) || /\bgrok\b/.test(t)) return true;
+  if (/\bproibido\b/.test(t) || /\bobrigatorio\b/.test(t) || /\bforbidden\b/.test(t)) return true;
+  if (/\bend_call\b/.test(t) || /\bforce_message\b/.test(t) || /\blanguage_hint\b/.test(t)) return true;
+  if (/\bpt-br\b/.test(t) || /\bwaitforcallee\b/.test(t)) return true;
+  if (/\bnao (invert|reveles|ditas)\b/.test(t) || /\bdo not (reveal|read|speak)\b/.test(t)) return true;
+  if (/\bsystem prompt\b/.test(t) || /\binternal (tool|prompt|instruction)/.test(t)) return true;
+  if (/\bprioridade maxima\b/.test(t) || /\bhighest priority\b/.test(t)) return true;
+  return false;
 }
 
 function unwrapScriptLine(line: string): string | undefined {
@@ -297,6 +427,7 @@ function toSpokenAsk(prose: string, language: Language): string {
 function isCleanSpokenProse(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
+  if (looksLikeSystemRule(t)) return false;
   if (/\broleplay\b/i.test(t)) return false;
   if (/```/.test(t) || /^#{1,6}\s+/.test(t)) return false;
   if (SCRIPT_LINE_LABEL.test(t)) return false;
@@ -316,7 +447,10 @@ function assertNaturalSpeech(spoken: string): string {
     .replace(/\bbem[- ]vind[oa]s? ao restaurante\b[^.!?]*[.!?]?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
-  return cleaned;
+  const kept = splitRawSentences(cleaned).filter(
+    (sentence) => !looksLikeSystemRule(sentence) && !looksLikeVenueWelcome(sentence),
+  );
+  return kept.join(" ").replace(/\s+/g, " ").trim();
 }
 
 function stripDiacritics(value: string): string {

@@ -353,6 +353,99 @@ describe("media bridge Telnyx ↔ Grok", () => {
     spyLog.mockRestore();
   });
 
+  it("unlocks waitForCallee on ASR mangled Still? / Hello? as short greetings", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 3205;
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u-still",
+      transcript: "Still?",
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(
+      logs.some((line) =>
+        /unlock via short_greeting \(transcript\).*3205ms since stream start.*text="Still\?"/.test(line),
+      ),
+    ).toBe(true);
+
+    spyLog.mockRestore();
+
+    const grokSend2 = vi.fn();
+    const logs2: string[] = [];
+    const spyLog2 = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs2.push(args.map(String).join(" "));
+    });
+    const bridge2 = new MediaBridge({
+      call: { ...sampleCall(), id: "call-hello", waitForCallee: true },
+      sendGrok: grokSend2,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => 400,
+    });
+    bridge2.onTelnyxMessage({ event: "start" });
+    await bridge2.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u-hello",
+      transcript: "Hello?",
+    });
+    expect(forceMessageCount(grokSend2)).toBe(1);
+    expect(
+      logs2.some((line) => /unlock via short_greeting \(transcript\).*text="Hello\?"/.test(line)),
+    ).toBe(true);
+    spyLog2.mockRestore();
+  });
+
+  it("unlocks waitForCallee on a short post-grace answer via media without waiting for ASR", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 600;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(0);
+
+    clock.ms = 650;
+    bridge.onTelnyxMessage({
+      event: "media",
+      media: { track: "inbound", payload: "QUJDRA==" },
+    });
+    expect(forceMessageCount(grokSend)).toBe(0);
+
+    clock.ms = 680;
+    bridge.onTelnyxMessage({
+      event: "media",
+      media: { track: "inbound", payload: "QUJDRA==" },
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(
+      logs.some((line) => /unlock via short_answer \(media\).*680ms since stream start/.test(line)),
+    ).toBe(true);
+    spyLog.mockRestore();
+  });
+
   it("records assistant and user transcripts", () => {
     const bridge = new MediaBridge({
       call: sampleCall(),

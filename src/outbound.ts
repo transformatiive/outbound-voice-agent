@@ -126,7 +126,8 @@ export function parseOutboundBody(
     body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
   const greeting = composeSpokenGreeting({
     language,
-    ...(personaRaw ? { persona: personaRaw } : greetingRaw ? { greeting: greetingRaw } : {}),
+    ...(personaRaw ? { persona: personaRaw } : {}),
+    ...(greetingRaw ? { greeting: greetingRaw } : {}),
     objective,
     ...(spokenAskRaw ? { spokenAsk: spokenAskRaw } : {}),
     timezone,
