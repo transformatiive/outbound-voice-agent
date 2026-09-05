@@ -1,6 +1,5 @@
 import express from "express";
 import type { Server as HttpServer } from "node:http";
-import type { WebSocket } from "ws";
 import { requireApiKey } from "./auth.js";
 import type { AppConfig } from "./config.js";
 import { CallStore } from "./calls/store.js";
@@ -18,6 +17,13 @@ import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
 import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
+import {
+  CallRuntime,
+  CallRuntimeRegistry,
+  resolveConnectGrok,
+  type ConnectGrokFn,
+} from "./bridge/call-runtime.js";
+import { createElevenLabsTts } from "./elevenlabs.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
 
@@ -26,7 +32,7 @@ export type AppDeps = {
   telnyx: TelnyxClient;
   store?: CallStore;
   fetchImpl?: typeof fetch;
-  connectGrok?: (url: string, apiKey: string) => WebSocket;
+  connectGrok?: ConnectGrokFn;
 };
 
 export type CreatedApp = {
@@ -39,12 +45,36 @@ export function createApp(deps: AppDeps): CreatedApp {
   const store = deps.store ?? new CallStore();
   const fetchImpl = deps.fetchImpl ?? fetch;
   const greetingAudioCache = new GreetingAudioCache();
+  const runtimes = new CallRuntimeRegistry();
+  const connectGrok = resolveConnectGrok(deps.connectGrok);
+  const elevenLabsTts = deps.config.elevenlabs.configured
+    ? createElevenLabsTts(deps.config.elevenlabs, fetchImpl)
+    : undefined;
   const notified = new Set<string>();
 
   const onCallEnded = (call: CallRecord) => {
+    runtimes.drop(call.id);
+    greetingAudioCache.drop(call.id);
     if (notified.has(call.id)) return;
     notified.add(call.id);
     void notifyResultWebhook(deps.config.resultWebhook, call, fetchImpl);
+  };
+
+  const startRuntime = (call: CallRecord) => {
+    runtimes.start(
+      call.id,
+      () =>
+        new CallRuntime({
+          call,
+          config: deps.config,
+          telnyx: deps.telnyx,
+          connectGrok,
+          onEnded: onCallEnded,
+          greetingAudioCache,
+          onClosed: () => runtimes.drop(call.id),
+          ...(elevenLabsTts ? { elevenLabsTts } : {}),
+        }),
+    );
   };
 
   const app = express();
@@ -133,6 +163,12 @@ export function createApp(deps: AppDeps): CreatedApp {
       body: req.body as Record<string, unknown>,
       fetchImpl,
       greetingAudioCache,
+      onCallCreated: startRuntime,
+      onDialFailed: (call) => {
+        runtimes.drop(call.id);
+        greetingAudioCache.drop(call.id);
+      },
+      ...(elevenLabsTts ? { elevenLabsTts } : {}),
     });
     if ("error" in result) {
       res.status(result.error.status).json(result.error);
@@ -171,8 +207,9 @@ export function createApp(deps: AppDeps): CreatedApp {
       telnyx: deps.telnyx,
       onCallEnded,
       greetingAudioCache,
-      ...(deps.connectGrok ? { connectGrok: deps.connectGrok } : {}),
-      ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+      connectGrok,
+      runtimes,
+      ...(elevenLabsTts ? { elevenLabsTts } : {}),
     });
   }
 

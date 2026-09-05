@@ -1179,6 +1179,55 @@ describe("media bridge ElevenLabs TTS playback", () => {
     spyLog.mockRestore();
   });
 
+  it("holds Telnyx playback until output is ready while still generating the Grok greeting", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      outputReady: false,
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "greet-prefetch" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    await bridge.onGrokEvent({ type: "response.done", response_id: "greet-prefetch" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(telnyxSend).not.toHaveBeenCalled();
+
+    bridge.markOutputReady();
+    expect(telnyxSend).not.toHaveBeenCalled();
+
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      transcript: "Estou",
+    });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "GROKAUDIO" } });
+  });
+
+  it("sends cached Grok greeting frames to Telnyx on the unlock call without waiting a microtask", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      transcript: "Estou",
+    });
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "GROKAUDIO" } });
+    expect(forceMessageCount(grokSend)).toBe(1);
+  });
+
   it("primes Grok greeting audio on session ready and only plays Telnyx media after waitForCallee unlock", async () => {
     const clock = { ms: 0 };
     const logs: string[] = [];

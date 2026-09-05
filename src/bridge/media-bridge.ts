@@ -71,6 +71,8 @@ export type MediaBridgeOptions = {
   clockMs?: () => number;
   elevenLabsTts?: ElevenLabsTts;
   greetingAudioCache?: GreetingAudioCache;
+  /** False until Telnyx media is attached so dial-time warmup cannot leak PCMU during ring. */
+  outputReady?: boolean;
 };
 
 export class MediaBridge {
@@ -117,6 +119,8 @@ export class MediaBridge {
   private greetingForceSent = false;
   private grokGreetingComplete = false;
   private readonly grokGreetingBuffer = new PcmuFrameBuffer();
+  private outputReady: boolean;
+  private pendingSpeak = false;
   private lastSpeechStoppedAtMs: number | undefined;
   private elTrace: ElLatencyTrace | undefined;
   private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
@@ -147,6 +151,8 @@ export class MediaBridge {
     this.clockMs = opts.clockMs ?? Date.now;
     this.elevenLabsTts = opts.elevenLabsTts;
     this.greetingAudioCache = opts.greetingAudioCache ?? new GreetingAudioCache();
+    this.outputReady = opts.outputReady ?? true;
+    this.pendingSpeak = false;
     this.primeGreetingGeneration();
   }
 
@@ -178,6 +184,13 @@ export class MediaBridge {
     await this.drainPcmuBuffer(this.grokGreetingBuffer, { isGreeting: true, cacheStatus });
   }
 
+  /** Telnyx media is live — playback of already-generated greeting may start (unless waitForCallee). */
+  markOutputReady(): void {
+    if (this.outputReady) return;
+    this.outputReady = true;
+    if (this.pendingSpeak || this.call.waitForCallee !== true) this.speakGreeting();
+  }
+
   configureGrokSession(): void {
     const waitForCallee = this.isWaitingForCalleeSpeech();
     const autoRespond = this.greetingSent && !this.greetingPlaying;
@@ -205,6 +218,11 @@ export class MediaBridge {
 
   speakGreeting(): void {
     if (this.greetingSent) return;
+    if (!this.outputReady) {
+      this.pendingSpeak = true;
+      return;
+    }
+    this.pendingSpeak = false;
     const wasWaiting = this.call.waitForCallee === true;
     const unlockAtMs = this.clockMs();
     this.greetingSent = true;
@@ -261,6 +279,7 @@ export class MediaBridge {
         if (this.call.status === "answered" || this.call.status === "dialing" || this.call.status === "ringing") {
           this.call.status = "in_progress";
         }
+        this.markOutputReady();
         this.primeGreetingGeneration();
         return;
       case "media": {
@@ -288,7 +307,7 @@ export class MediaBridge {
         return;
       case "session.updated":
         this.queueScriptedGreeting();
-        if (this.call.waitForCallee !== true) this.speakGreeting();
+        if (this.call.waitForCallee !== true && this.outputReady) this.speakGreeting();
         return;
       case "response.created":
         this.onGrokResponseCreated(event);
@@ -876,23 +895,30 @@ export class MediaBridge {
     this.beginTurnAudio();
     let firstTelnyxSent = false;
     let index = 0;
+    const emitAvailable = (): boolean => {
+      while (index < buffer.frames.length) {
+        if (generation !== this.elGeneration || this.suppressAssistantAudio || !this.outputReady) {
+          return false;
+        }
+        const chunk = buffer.frames[index];
+        index += 1;
+        if (!chunk) continue;
+        this.noteTurnAudio(chunk);
+        this.sendTelnyx({ event: "media", media: { payload: chunk } });
+        if (!firstTelnyxSent) {
+          firstTelnyxSent = true;
+          this.noteFirstTelnyxMedia(opts.cacheStatus);
+        }
+      }
+      return true;
+    };
     try {
+      if (!emitAvailable()) return;
       while (generation === this.elGeneration) {
+        if (buffer.done || buffer.failed) break;
         await buffer.waitForIndex(index);
         if (generation !== this.elGeneration || this.suppressAssistantAudio) return;
-        while (index < buffer.frames.length) {
-          if (generation !== this.elGeneration || this.suppressAssistantAudio) return;
-          const chunk = buffer.frames[index];
-          index += 1;
-          if (!chunk) continue;
-          this.noteTurnAudio(chunk);
-          this.sendTelnyx({ event: "media", media: { payload: chunk } });
-          if (!firstTelnyxSent) {
-            firstTelnyxSent = true;
-            this.noteFirstTelnyxMedia(opts.cacheStatus);
-          }
-        }
-        if (buffer.done || buffer.failed) break;
+        if (!emitAvailable()) return;
       }
     } finally {
       if (generation === this.elGeneration) {

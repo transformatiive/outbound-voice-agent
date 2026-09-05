@@ -6,6 +6,7 @@ import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.j
 import { parseTtsProvider, type TtsProvider } from "./tts.js";
 import { createElevenLabsTts } from "./elevenlabs.js";
 import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
+import type { ElevenLabsTts } from "./elevenlabs.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -170,6 +171,9 @@ export async function placeOutboundCall(opts: {
   body: OutboundBody;
   fetchImpl?: typeof fetch;
   greetingAudioCache?: GreetingAudioCache;
+  elevenLabsTts?: ElevenLabsTts;
+  onCallCreated?: (call: CallRecord) => void;
+  onDialFailed?: (call: CallRecord) => void;
 }): Promise<{ call: CallRecord } | { error: OutboundError }> {
   if (!opts.config.ready.outbound) {
     return { error: { status: 503, error: "outbound_not_ready", details: opts.config.ready } };
@@ -219,13 +223,14 @@ export async function placeOutboundCall(opts: {
     ...(parsed.value.metadata ? { metadata: parsed.value.metadata } : {}),
   };
   opts.store.create(call);
+  opts.onCallCreated?.(call);
 
   if (
     call.ttsProvider === "elevenlabs" &&
     opts.config.elevenlabs.configured &&
     opts.greetingAudioCache
   ) {
-    const tts = createElevenLabsTts(opts.config.elevenlabs, opts.fetchImpl ?? fetch);
+    const tts = opts.elevenLabsTts ?? createElevenLabsTts(opts.config.elevenlabs, opts.fetchImpl ?? fetch);
     console.info(`[call ${call.id}] el_latency stage=prefetch_start turn=greeting source=dial`);
     opts.greetingAudioCache.startIfNeeded({
       callId: call.id,
@@ -258,6 +263,7 @@ export async function placeOutboundCall(opts: {
     return { call };
   } catch (err) {
     opts.greetingAudioCache?.abort(call.id);
+    opts.onDialFailed?.(call);
     call.status = "failed";
     call.endedReason = "dial_failed";
     call.endedAt = new Date().toISOString();

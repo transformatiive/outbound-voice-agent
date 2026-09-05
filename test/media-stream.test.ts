@@ -110,6 +110,9 @@ describe("media stream websocket", () => {
       const call = store.get(created.body.id as string);
       if (!call) throw new Error("call missing");
 
+      const grokWs = await grokConnection;
+      await waitFor(grokFromApp, (m) => m.type === "session.update");
+
       const telnyxFromGrok: JsonObject[] = [];
       const telnyxWs = new WebSocket(
         `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
@@ -122,8 +125,7 @@ describe("media stream websocket", () => {
         telnyxWs.once("error", reject);
       });
 
-      const grokWs = await grokConnection;
-      const sessionUpdate = await waitFor(grokFromApp, (m) => m.type === "session.update");
+      const sessionUpdate = grokFromApp.find((m) => m.type === "session.update") as JsonObject;
       expect((sessionUpdate.session as JsonObject).voice).toBe("ara");
 
       grokWs.send(JSON.stringify({ type: "session.updated" }));
@@ -207,18 +209,6 @@ describe("media stream websocket", () => {
       if (!call) throw new Error("call missing");
       expect(call.waitForCallee).toBe(true);
 
-      const telnyxFromGrok: JsonObject[] = [];
-      const telnyxWs = new WebSocket(
-        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
-      );
-      telnyxWs.on("message", (data) => {
-        telnyxFromGrok.push(JSON.parse(String(data)) as JsonObject);
-      });
-      await new Promise<void>((resolve, reject) => {
-        telnyxWs.once("open", () => resolve());
-        telnyxWs.once("error", reject);
-      });
-
       const grokWs = await grokConnection;
       const sessionUpdate = await waitFor(grokFromApp, (m) => m.type === "session.update");
       expect(String((sessionUpdate.session as JsonObject).instructions)).toMatch(
@@ -234,10 +224,23 @@ describe("media stream websocket", () => {
       grokWs.send(JSON.stringify({ type: "session.updated" }));
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "auto-1" }));
       grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "UlRQQQ==" }));
-      await new Promise((r) => setTimeout(r, 80));
-      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(true);
+      await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
       expect(grokFromApp.some((m) => m.type === "response.create")).toBe(false);
       expect(grokFromApp.some((m) => m.type === "response.cancel")).toBe(false);
+
+      const telnyxFromGrok: JsonObject[] = [];
+      const telnyxWs = new WebSocket(
+        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
+      );
+      telnyxWs.on("message", (data) => {
+        telnyxFromGrok.push(JSON.parse(String(data)) as JsonObject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        telnyxWs.once("open", () => resolve());
+        telnyxWs.once("error", reject);
+      });
+      telnyxWs.send(JSON.stringify({ event: "start" }));
+      await new Promise((r) => setTimeout(r, 40));
       expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
 
       grokWs.send(JSON.stringify({ type: "input_audio_buffer.speech_started" }));
