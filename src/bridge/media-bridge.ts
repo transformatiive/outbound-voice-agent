@@ -10,7 +10,10 @@ import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
+  hasPendingPostGraceUnlock,
+  msSinceStreamStart,
   noteStreamStart,
+  onPostGraceCheck,
   onSpeechStarted,
   onSpeechStopped,
   onTranscript,
@@ -162,6 +165,7 @@ export class MediaBridge {
         if (typeof payload === "string" && payload.length > 0) {
           this.sendGrok({ type: "input_audio_buffer.append", audio: payload });
         }
+        this.maybeUnlockAfterGrace("media");
         return;
       }
       case "stop":
@@ -200,6 +204,7 @@ export class MediaBridge {
         const decision = onSpeechStarted(this.calleeGate, waiting, this.clockMs(), this.calleeSpeechConfig);
         if (waiting) {
           this.logCalleeGate(decision, "speech_started");
+          if (decision.unlock) this.speakGreeting();
           return;
         }
         if (this.greetingPlaying && this.call.waitForCallee === true) return;
@@ -422,13 +427,30 @@ export class MediaBridge {
     if (idx >= 0) this.responseDoneWaiters.splice(idx, 1);
   }
 
+  private maybeUnlockAfterGrace(event: string): void {
+    if (!this.isWaitingForCalleeSpeech()) return;
+    if (!hasPendingPostGraceUnlock(this.calleeGate)) return;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    if (elapsed === undefined || elapsed < this.calleeSpeechConfig.graceMs) return;
+    const decision = onPostGraceCheck(this.calleeGate, true, this.clockMs(), this.calleeSpeechConfig);
+    this.logCalleeGate(decision, event);
+    if (decision.unlock) this.speakGreeting();
+  }
+
   private logCalleeGate(decision: CalleeSpeechDecision, event: string): void {
+    if (decision.reason === "not_waiting") return;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    const elapsedLabel =
+      elapsed === undefined ? "stream not started" : `${elapsed}ms since stream start`;
     if (decision.unlock) {
-      console.info(`[bridge ${this.call.id}] waitForCallee: unlock via ${decision.reason} (${event})`);
+      console.info(
+        `[bridge ${this.call.id}] waitForCallee: unlock via ${decision.reason} (${event}) — ${elapsedLabel}`,
+      );
       return;
     }
-    if (decision.reason === "not_waiting") return;
-    console.info(`[bridge ${this.call.id}] waitForCallee: greeting blocked (${decision.reason}) on ${event}`);
+    console.info(
+      `[bridge ${this.call.id}] waitForCallee: greeting blocked (${decision.reason}) on ${event} — ${elapsedLabel}`,
+    );
   }
 
   private flushUserTranscript(): void {

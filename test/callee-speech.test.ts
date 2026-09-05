@@ -3,9 +3,12 @@ import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
+  hasPendingPostGraceUnlock,
   isNonEmptyCalleeTranscript,
   isShortCalleeGreeting,
+  msSinceStreamStart,
   noteStreamStart,
+  onPostGraceCheck,
   onSpeechStarted,
   onSpeechStopped,
   onTranscript,
@@ -17,9 +20,17 @@ const config = {
 };
 
 describe("callee speech gate (waitForCallee)", () => {
-  it("defaults grace to 1000ms and min speech to 130ms", () => {
-    expect(DEFAULT_CALLEE_SPEECH_GRACE_MS).toBe(1000);
+  it("defaults grace to 500ms and min speech to 130ms", () => {
+    expect(DEFAULT_CALLEE_SPEECH_GRACE_MS).toBe(500);
     expect(DEFAULT_CALLEE_MIN_SPEECH_MS).toBe(130);
+  });
+
+  it("reports milliseconds since stream start", () => {
+    const gate = createCalleeSpeechGate();
+    expect(msSinceStreamStart(gate, 100)).toBeUndefined();
+    noteStreamStart(gate, 1000);
+    expect(msSinceStreamStart(gate, 1000)).toBe(0);
+    expect(msSinceStreamStart(gate, 1420)).toBe(420);
   });
 
   it("treats whitespace-only ASR as empty and short phone greetings as unlockable", () => {
@@ -43,7 +54,7 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(early).toEqual({ unlock: false, reason: "grace_period" });
     expect(gate.acceptedSpeechStartedAtMs).toBeUndefined();
 
-    const atGraceEdge = onSpeechStarted(gate, true, 999, config);
+    const atGraceEdge = onSpeechStarted(gate, true, 499, config);
     expect(atGraceEdge.reason).toBe("grace_period");
     expect(atGraceEdge.unlock).toBe(false);
   });
@@ -51,44 +62,44 @@ describe("callee speech gate (waitForCallee)", () => {
   it("does not unlock on speech_started alone after grace — waits for min duration or transcript", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    const started = onSpeechStarted(gate, true, 1000, config);
+    const started = onSpeechStarted(gate, true, 500, config);
     expect(started).toEqual({ unlock: false, reason: "awaiting_min_duration" });
-    expect(gate.acceptedSpeechStartedAtMs).toBe(1000);
+    expect(gate.acceptedSpeechStartedAtMs).toBe(500);
   });
 
   it("does not duration-unlock while speech_stopped is still inside grace (ringback)", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
     onSpeechStarted(gate, true, 100, config);
-    const stopped = onSpeechStopped(gate, true, 800, config);
+    const stopped = onSpeechStopped(gate, true, 400, config);
     expect(stopped).toEqual({ unlock: false, reason: "grace_period" });
   });
 
   it("unlocks a word-length «estou» that starts in grace and ends after grace even with empty ASR", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    onSpeechStarted(gate, true, 850, config);
-    const stopped = onSpeechStopped(gate, true, 1000, config, 150);
+    onSpeechStarted(gate, true, 350, config);
+    const stopped = onSpeechStopped(gate, true, 500, config, 150);
     expect(stopped).toEqual({ unlock: true, reason: "min_speech_duration" });
   });
 
   it("unlocks after grace when speech lasts at least minSpeechMs", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    onSpeechStarted(gate, true, 1100, config);
-    const tooShort = onSpeechStopped(gate, true, 1100 + 80, config);
+    onSpeechStarted(gate, true, 600, config);
+    const tooShort = onSpeechStopped(gate, true, 600 + 80, config);
     expect(tooShort).toEqual({ unlock: false, reason: "speech_too_short" });
 
-    onSpeechStarted(gate, true, 2000, config);
-    const ok = onSpeechStopped(gate, true, 2000 + 130, config);
+    onSpeechStarted(gate, true, 900, config);
+    const ok = onSpeechStopped(gate, true, 900 + 130, config);
     expect(ok).toEqual({ unlock: true, reason: "min_speech_duration" });
   });
 
   it("uses VAD audio duration when speech_stopped provides it", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    onSpeechStarted(gate, true, 1200, config);
-    const ok = onSpeechStopped(gate, true, 1210, config, 140);
+    onSpeechStarted(gate, true, 700, config);
+    const ok = onSpeechStopped(gate, true, 710, config, 140);
     expect(ok).toEqual({ unlock: true, reason: "min_speech_duration" });
   });
 
@@ -110,11 +121,50 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(duringGrace).toEqual({ unlock: true, reason: "non_empty_transcript" });
   });
 
+  it("remembers a word-length «estou» inside grace and unlocks as soon as grace ends", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 180, config);
+    const during = onSpeechStopped(gate, true, 330, config, 150);
+    expect(during).toEqual({ unlock: false, reason: "grace_period" });
+    expect(hasPendingPostGraceUnlock(gate)).toBe(true);
+
+    const stillInGrace = onPostGraceCheck(gate, true, 499, config);
+    expect(stillInGrace).toEqual({ unlock: false, reason: "grace_period" });
+    expect(hasPendingPostGraceUnlock(gate)).toBe(true);
+
+    const afterGrace = onPostGraceCheck(gate, true, 500, config);
+    expect(afterGrace).toEqual({ unlock: true, reason: "grace_elapsed" });
+    expect(hasPendingPostGraceUnlock(gate)).toBe(false);
+  });
+
+  it("does not pending-unlock a sub-min click during grace", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 50, config);
+    onSpeechStopped(gate, true, 80, config, 30);
+    expect(hasPendingPostGraceUnlock(gate)).toBe(false);
+    expect(onPostGraceCheck(gate, true, 500, config)).toEqual({
+      unlock: false,
+      reason: "no_accepted_utterance",
+    });
+  });
+
+  it("unlocks pending grace speech on the first post-grace speech_started (no extra wait)", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 200, config);
+    onSpeechStopped(gate, true, 360, config, 160);
+    const started = onSpeechStarted(gate, true, 500, config);
+    expect(started).toEqual({ unlock: true, reason: "grace_elapsed" });
+  });
+
   it("does not unlock when not waiting", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
     expect(onSpeechStarted(gate, false, 2000, config)).toEqual({ unlock: false, reason: "not_waiting" });
     expect(onSpeechStopped(gate, false, 2300, config)).toEqual({ unlock: false, reason: "not_waiting" });
     expect(onTranscript(false, "Estou")).toEqual({ unlock: false, reason: "not_waiting" });
+    expect(onPostGraceCheck(gate, false, 2000, config)).toEqual({ unlock: false, reason: "not_waiting" });
   });
 });
