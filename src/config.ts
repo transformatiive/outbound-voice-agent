@@ -8,6 +8,7 @@ import {
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
 } from "./bridge/callee-speech.js";
 import {
+  DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
   elevenlabsConfigFromEnv,
   openaiConfigFromEnv,
   type ElevenLabsConfig,
@@ -43,6 +44,7 @@ export type AppConfig = {
   calleeSpeechGraceMs: number;
   calleeMinSpeechMs: number;
   hangupPlayoutBufferMs: number;
+  elevenlabsVadSilenceMs: number;
   publicBaseUrl: string;
   resultWebhook: string | undefined;
   maxCallSeconds: number;
@@ -119,6 +121,9 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const hangupPlayoutBufferMs = Math.round(
     envNumber(env, "GROK_HANGUP_PLAYOUT_MS", 1000, 0, 8000),
   );
+  const elevenlabsVadSilenceMs = Math.round(
+    envNumber(env, "ELEVENLABS_VAD_SILENCE_MS", DEFAULT_ELEVENLABS_VAD_SILENCE_MS, 100, 2000),
+  );
   const elevenlabs = elevenlabsConfigFromEnv(env);
   const openai = openaiConfigFromEnv(env);
   const resultWebhook = env.RESULT_WEBHOOK?.trim() || undefined;
@@ -161,6 +166,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     calleeSpeechGraceMs,
     calleeMinSpeechMs,
     hangupPlayoutBufferMs,
+    elevenlabsVadSilenceMs,
     publicBaseUrl,
     resultWebhook,
     maxCallSeconds,

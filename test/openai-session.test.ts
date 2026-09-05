@@ -44,7 +44,7 @@ describe("OpenAI Realtime session", () => {
     expect(payload.session.audio.input.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,
-      silence_duration_ms: 160,
+      silence_duration_ms: 130,
       prefix_padding_ms: 200,
       create_response: false,
       interrupt_response: true,

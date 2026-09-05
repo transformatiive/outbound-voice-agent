@@ -1,5 +1,8 @@
 import type { Language } from "./prompt.js";
-import type { ElevenLabsConfig } from "./tts.js";
+import {
+  DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+  type ElevenLabsConfig,
+} from "./tts.js";
 
 export const ELEVENLABS_API_BASE = "https://api.elevenlabs.io";
 export const ELEVENLABS_PCMU_FRAME_BYTES = 160;
@@ -11,6 +14,8 @@ export type ElevenLabsSpeakInput = {
   text: string;
   language: Language;
   signal: AbortSignal;
+  onHttpStart?: () => void;
+  onFirstByte?: () => void;
 };
 
 export type ElevenLabsTts = {
@@ -85,6 +90,7 @@ export function consumeSourceToPcmu(
 export class PcmuStreamEncoder {
   private sourceRest: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   private pcmuRest: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  private emittedFirst = false;
 
   constructor(private readonly sourceFormat: ElevenLabsOutputFormat) {}
 
@@ -100,6 +106,11 @@ export class PcmuStreamEncoder {
       offset += ELEVENLABS_PCMU_FRAME_BYTES;
     }
     this.pcmuRest = offset < pending.length ? Buffer.from(pending.subarray(offset)) : Buffer.alloc(0);
+    if (!this.emittedFirst && frames.length === 0 && this.pcmuRest.length > 0) {
+      frames.push(this.pcmuRest.toString("base64"));
+      this.pcmuRest = Buffer.alloc(0);
+    }
+    if (frames.length > 0) this.emittedFirst = true;
     return frames;
   }
 
@@ -120,8 +131,9 @@ export function createElevenLabsTts(
   config: ElevenLabsConfig,
   fetchImpl: typeof fetch = fetch,
 ): ElevenLabsTts {
+  const formatCache: { format?: ElevenLabsOutputFormat } = {};
   return {
-    speakToPcmu: (input) => streamElevenLabsPcmu({ config, fetchImpl, ...input }),
+    speakToPcmu: (input) => streamElevenLabsPcmu({ config, fetchImpl, formatCache, ...input }),
   };
 }
 
@@ -131,20 +143,32 @@ export async function* streamElevenLabsPcmu(opts: {
   language: Language;
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
+  formatCache?: { format?: ElevenLabsOutputFormat };
+  onHttpStart?: () => void;
+  onFirstByte?: () => void;
 }): AsyncGenerator<string, void, unknown> {
   const text = opts.text.trim();
   if (!text) return;
   const fetchImpl = opts.fetchImpl ?? fetch;
+  opts.onHttpStart?.();
   const { response, format } = await requestElevenLabsAudio({
     config: opts.config,
     text,
     language: opts.language,
     signal: opts.signal,
     fetchImpl,
+    ...(opts.formatCache ? { formatCache: opts.formatCache } : {}),
   });
   const encoder = new PcmuStreamEncoder(format);
+  let sawFirstByte = false;
+  const noteFirstByte = (): void => {
+    if (sawFirstByte) return;
+    sawFirstByte = true;
+    opts.onFirstByte?.();
+  };
   if (!response.body) {
     const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > 0) noteFirstByte();
     for (const frame of encoder.push(bytes)) yield frame;
     for (const frame of encoder.flush()) yield frame;
     return;
@@ -159,6 +183,7 @@ export async function* streamElevenLabsPcmu(opts: {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value || value.byteLength === 0) continue;
+      noteFirstByte();
       for (const frame of encoder.push(value)) yield frame;
     }
     for (const frame of encoder.flush()) yield frame;
@@ -173,17 +198,19 @@ async function requestElevenLabsAudio(opts: {
   language: Language;
   signal: AbortSignal;
   fetchImpl: typeof fetch;
+  formatCache?: { format?: ElevenLabsOutputFormat };
 }): Promise<{ response: Response; format: ElevenLabsOutputFormat }> {
   let lastStatus = 0;
   let lastBody = "";
-  for (const format of ELEVENLABS_OUTPUT_FORMATS) {
+  const cached = opts.formatCache?.format;
+  const formats: ElevenLabsOutputFormat[] = cached
+    ? [cached]
+    : [...ELEVENLABS_OUTPUT_FORMATS];
+  for (const format of formats) {
     if (opts.signal.aborted) {
       throw abortError();
     }
-    const url =
-      `${ELEVENLABS_API_BASE}/v1/text-to-speech/${encodeURIComponent(opts.config.voiceId)}/stream` +
-      `?output_format=${format}`;
-    const response = await opts.fetchImpl(url, {
+    const response = await opts.fetchImpl(elevenLabsStreamUrl(opts.config, format), {
       method: "POST",
       headers: {
         "xi-api-key": opts.config.apiKey,
@@ -197,7 +224,10 @@ async function requestElevenLabsAudio(opts: {
       }),
       signal: opts.signal,
     });
-    if (response.ok) return { response, format };
+    if (response.ok) {
+      if (opts.formatCache) opts.formatCache.format = format;
+      return { response, format };
+    }
     lastStatus = response.status;
     lastBody = await response.text().catch(() => "");
     if (response.status === 401 || response.status === 403 || response.status === 404) {
@@ -208,6 +238,15 @@ async function requestElevenLabsAudio(opts: {
     }
   }
   throw new Error(`elevenlabs_tts_failed: HTTP ${lastStatus} ${lastBody.slice(0, 200)}`);
+}
+
+function elevenLabsStreamUrl(config: ElevenLabsConfig, format: ElevenLabsOutputFormat): string {
+  const latency = config.optimizeStreamingLatency ?? DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY;
+  let url =
+    `${ELEVENLABS_API_BASE}/v1/text-to-speech/${encodeURIComponent(config.voiceId)}/stream` +
+    `?output_format=${format}`;
+  if (latency > 0) url += `&optimize_streaming_latency=${latency}`;
+  return url;
 }
 
 function abortError(): Error {

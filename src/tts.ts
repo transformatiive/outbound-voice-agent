@@ -3,8 +3,12 @@ export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
-/** Benedita. Not a secret — override with ELEVENLABS_VOICE_ID. */
-export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezLnCDRKHkWiX";
+/** Benedita. 20-char voice id (`Ten`, not `Ln`). Override with ELEVENLABS_VOICE_ID. */
+export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezTenCDRKHkWiX";
+/** ElevenLabs stream URL `optimize_streaming_latency` (0–4). 4 is faster/lower quality. */
+export const DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY = 3;
+/** Shared server_vad end-of-turn silence for every TTS provider (Grok, ElevenLabs, OpenAI). */
+export const DEFAULT_ELEVENLABS_VAD_SILENCE_MS = 130;
 
 export const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1";
 /** Feminine expressive Realtime voice suitable for PT. Override with OPENAI_VOICE=marin for OpenAI's quality pick. */
@@ -17,6 +21,7 @@ export type ElevenLabsConfig = {
   voiceId: string;
   model: string;
   configured: boolean;
+  optimizeStreamingLatency?: number;
 };
 
 export type OpenAIConfig = {
@@ -56,6 +61,12 @@ export function elevenlabsConfigFromEnv(env: Record<string, string | undefined>)
     voiceId,
     model,
     configured: Boolean(apiKey),
+    optimizeStreamingLatency: clampEnvInt(
+      env.ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+      DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+      0,
+      4,
+    ),
   };
 }
 
@@ -82,4 +93,17 @@ export function openaiConfigFromEnv(env: Record<string, string | undefined>): Op
 /** True when OpenAI Realtime can own the PSTN speech-to-speech leg (API key present). */
 export function openaiAudioPathActive(config: OpenAIConfig): boolean {
   return config.configured;
+}
+
+function clampEnvInt(
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
 }

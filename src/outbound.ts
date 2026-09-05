@@ -5,6 +5,9 @@ import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js"
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
 import { parseOpenAIVoice } from "./openai/session.js";
 import { parseTtsProvider, type TtsProvider } from "./tts.js";
+import { createElevenLabsTts } from "./elevenlabs.js";
+import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
+import type { ElevenLabsTts } from "./elevenlabs.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
@@ -192,6 +195,11 @@ export async function placeOutboundCall(opts: {
   openaiSessions?: OpenAISessionStore;
   connectOpenAI?: ConnectOpenAI;
   onCallEnded?: (call: CallRecord) => void;
+  fetchImpl?: typeof fetch;
+  greetingAudioCache?: GreetingAudioCache;
+  elevenLabsTts?: ElevenLabsTts;
+  onCallCreated?: (call: CallRecord) => void;
+  onDialFailed?: (call: CallRecord) => void;
 }): Promise<{ call: CallRecord } | { error: OutboundError }> {
   if (!opts.config.ready.outbound) {
     return { error: { status: 503, error: "outbound_not_ready", details: opts.config.ready } };
@@ -287,6 +295,27 @@ export async function placeOutboundCall(opts: {
   opts.store.create(call);
   if (openaiSession && opts.openaiSessions) {
     opts.openaiSessions.set(call.id, openaiSession);
+  } else if (parsed.value.ttsProvider !== "openai") {
+    opts.onCallCreated?.(call);
+  }
+
+  if (
+    call.ttsProvider === "elevenlabs" &&
+    opts.config.elevenlabs.configured &&
+    opts.greetingAudioCache
+  ) {
+    const tts = opts.elevenLabsTts ?? createElevenLabsTts(opts.config.elevenlabs, opts.fetchImpl ?? fetch);
+    console.info(`[call ${call.id}] el_latency stage=prefetch_start turn=greeting source=dial`);
+    opts.greetingAudioCache.startIfNeeded({
+      callId: call.id,
+      text: call.greeting,
+      language: call.language,
+      tts,
+      onHttpStart: () =>
+        console.info(`[call ${call.id}] el_latency stage=el_http_start turn=greeting source=dial`),
+      onFirstByte: () =>
+        console.info(`[call ${call.id}] el_latency stage=el_first_byte turn=greeting source=dial`),
+    });
   }
 
   try {
@@ -309,6 +338,8 @@ export async function placeOutboundCall(opts: {
   } catch (err) {
     openaiSession?.close();
     opts.openaiSessions?.close(call.id);
+    opts.greetingAudioCache?.abort(call.id);
+    opts.onDialFailed?.(call);
     call.status = "failed";
     call.endedReason = "dial_failed";
     call.endedAt = new Date().toISOString();
