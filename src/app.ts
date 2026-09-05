@@ -14,7 +14,7 @@ import {
 import { placeOutboundCall } from "./outbound.js";
 import { LANGUAGES } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
-import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive } from "./tts.js";
+import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive, openaiAudioPathActive } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
 import {
@@ -26,6 +26,8 @@ import {
 import { createElevenLabsTts } from "./elevenlabs.js";
 import { notifyResultWebhook } from "./result-webhook.js";
 import type { CallRecord } from "./calls/types.js";
+import { OpenAISessionStore } from "./openai/sessions.js";
+import type { ConnectOpenAI } from "./openai/prewarm.js";
 
 export type AppDeps = {
   config: AppConfig;
@@ -33,6 +35,8 @@ export type AppDeps = {
   store?: CallStore;
   fetchImpl?: typeof fetch;
   connectGrok?: ConnectGrokFn;
+  connectOpenAI?: ConnectOpenAI;
+  openaiSessions?: OpenAISessionStore;
 };
 
 export type CreatedApp = {
@@ -44,6 +48,7 @@ export type CreatedApp = {
 export function createApp(deps: AppDeps): CreatedApp {
   const store = deps.store ?? new CallStore();
   const fetchImpl = deps.fetchImpl ?? fetch;
+  const openaiSessions = deps.openaiSessions ?? new OpenAISessionStore();
   const greetingAudioCache = new GreetingAudioCache();
   const runtimes = new CallRuntimeRegistry();
   const connectGrok = resolveConnectGrok(deps.connectGrok);
@@ -55,6 +60,7 @@ export function createApp(deps: AppDeps): CreatedApp {
   const onCallEnded = (call: CallRecord) => {
     runtimes.drop(call.id);
     greetingAudioCache.drop(call.id);
+    openaiSessions.close(call.id);
     if (notified.has(call.id)) return;
     notified.add(call.id);
     void notifyResultWebhook(deps.config.resultWebhook, call, fetchImpl);
@@ -104,6 +110,12 @@ export function createApp(deps: AppDeps): CreatedApp {
           audioPathActive: elevenLabsAudioPathActive(deps.config.elevenlabs),
           model: deps.config.elevenlabs.model,
           voiceId: deps.config.elevenlabs.voiceId,
+        },
+        openai: {
+          configured: deps.config.openai.configured,
+          audioPathActive: openaiAudioPathActive(deps.config.openai),
+          model: deps.config.openai.model,
+          voice: deps.config.openai.voice,
         },
       },
       telnyx: {
@@ -161,13 +173,17 @@ export function createApp(deps: AppDeps): CreatedApp {
       telnyx: deps.telnyx,
       store,
       body: req.body as Record<string, unknown>,
+      openaiSessions,
+      onCallEnded,
       fetchImpl,
       greetingAudioCache,
       onCallCreated: startRuntime,
       onDialFailed: (call) => {
         runtimes.drop(call.id);
         greetingAudioCache.drop(call.id);
+        openaiSessions.close(call.id);
       },
+      ...(deps.connectOpenAI ? { connectOpenAI: deps.connectOpenAI } : {}),
       ...(elevenLabsTts ? { elevenLabsTts } : {}),
     });
     if ("error" in result) {
@@ -206,6 +222,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       store,
       telnyx: deps.telnyx,
       onCallEnded,
+      openaiSessions,
       greetingAudioCache,
       connectGrok,
       runtimes,

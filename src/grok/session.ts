@@ -33,7 +33,7 @@ export type TurnDetectionOptions = {
 
 /**
  * Phone-tuned server_vad. silence_duration_ms 130 so every provider
- * (Grok, ElevenLabs, later OpenAI) answers as soon as the callee stops.
+ * (Grok, ElevenLabs, OpenAI) answers as soon as the callee stops.
  * Override with GROK_VAD_SILENCE_MS if barge-in chopping shows up on a path.
  * ElevenLabs playback may still use ELEVENLABS_VAD_SILENCE_MS when set.
  * prefix_padding_ms 200 keeps barge-in audio; idle_timeout_ms is hang-idle, not turn gap.

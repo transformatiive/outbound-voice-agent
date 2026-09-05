@@ -21,6 +21,14 @@ const config: AppConfig = {
   grokModel: "grok-voice-think-fast-2.0",
   grokVoiceSpeed: 1,
   elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v3", configured: false },
+  openai: {
+    apiKey: "",
+    baseUrl: "https://api.openai.com",
+    model: "gpt-realtime-2.1",
+    voice: "coral",
+    configured: false,
+    prewarmTimeoutMs: 2000,
+  },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
@@ -32,7 +40,7 @@ const config: AppConfig = {
   webhookUrl: "https://example.up.railway.app/webhooks/telnyx",
   mediaStreamUrl: (callId, token) =>
     `wss://example.up.railway.app/media-stream?callId=${callId}&token=${token}`,
-  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false },
+  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false, openai: false },
 };
 
 describe("Telnyx webhooks", () => {

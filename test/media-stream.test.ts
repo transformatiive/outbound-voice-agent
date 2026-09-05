@@ -24,6 +24,14 @@ const config: AppConfig = {
   grokModel: "grok-voice-think-fast-2.0",
   grokVoiceSpeed: 1,
   elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v3", configured: false },
+  openai: {
+    apiKey: "",
+    baseUrl: "https://api.openai.com",
+    model: "gpt-realtime-2.1",
+    voice: "coral",
+    configured: false,
+    prewarmTimeoutMs: 2000,
+  },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
@@ -35,7 +43,7 @@ const config: AppConfig = {
   webhookUrl: "https://example.up.railway.app/webhooks/telnyx",
   mediaStreamUrl: (callId, token) =>
     `wss://example.up.railway.app/media-stream?callId=${callId}&token=${token}`,
-  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false },
+  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false, openai: false },
 };
 
 function listen(server: ReturnType<typeof createServer>): Promise<number> {
@@ -417,6 +425,97 @@ describe("media stream websocket", () => {
     } finally {
       httpServer.close();
       grokWss.close();
+    }
+  });
+
+  it("plays pre-cached OpenAI greeting to Telnyx only after waitForCallee unlock", async () => {
+    const { connectFakeOpenAI, FakeOpenAIWebSocket } = await import("./helpers/fake-openai-ws.js");
+    let fake: InstanceType<typeof FakeOpenAIWebSocket> | undefined;
+    const withOpenAI: AppConfig = {
+      ...config,
+      openai: {
+        apiKey: "sk-test",
+        baseUrl: "https://api.openai.com",
+        model: "gpt-realtime-2.1",
+        voice: "coral",
+        configured: true,
+        prewarmTimeoutMs: 2000,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+
+    const telnyx: TelnyxClient = {
+      dial: vi.fn(async () => ({
+        call_control_id: "v2:control-id",
+        call_leg_id: "leg-id",
+        call_session_id: "session-id",
+        is_alive: false,
+        record_type: "call",
+      })),
+      hangup: vi.fn(async () => undefined),
+    };
+
+    const { app, store, attach } = createApp({
+      config: withOpenAI,
+      telnyx,
+      connectOpenAI: () => {
+        fake = connectFakeOpenAI();
+        return fake as unknown as WebSocket;
+      },
+    });
+    const httpServer = createServer(app);
+    attach(httpServer);
+    const port = await listen(httpServer);
+
+    try {
+      const created = await request(app)
+        .post("/api/outbound")
+        .set("Authorization", "Bearer test-api-key")
+        .send({
+          to: "+351912345678",
+          language: "pt-PT",
+          greeting: "Olá, fala a secretária.",
+          objective: "Confirmar quinta",
+          tts_provider: "openai",
+          waitForCallee: true,
+        });
+      expect(created.status).toBe(201);
+      const call = store.get(created.body.id as string);
+      if (!call) throw new Error("call missing");
+      expect(call.ttsProvider).toBe("openai");
+      expect(fake).toBeDefined();
+      const sessionUpdate = fake?.sent.find((m: JsonObject) => m.type === "session.update");
+      expect((sessionUpdate?.session as JsonObject | undefined)?.type).toBe("realtime");
+      expect(fake?.sent.some((m: JsonObject) => m.type === "response.create")).toBe(true);
+
+      const telnyxFromOpenAI: JsonObject[] = [];
+      const telnyxWs = new WebSocket(
+        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
+      );
+      telnyxWs.on("message", (data) => {
+        telnyxFromOpenAI.push(JSON.parse(String(data)) as JsonObject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        telnyxWs.once("open", () => resolve());
+        telnyxWs.once("error", reject);
+      });
+      await new Promise((r) => setTimeout(r, 40));
+      expect(telnyxFromOpenAI.some((m) => m.event === "media")).toBe(false);
+
+      fake?.emit(
+        "message",
+        JSON.stringify({
+          type: "conversation.item.input_audio_transcription.completed",
+          item_id: "u1",
+          transcript: "Estou",
+        }),
+      );
+      const media = await waitFor(telnyxFromOpenAI, (m) => m.event === "media");
+      expect(media).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
+
+      telnyxWs.close();
+    } finally {
+      httpServer.close();
     }
   });
 

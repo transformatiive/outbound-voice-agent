@@ -3,6 +3,7 @@ import type { AppConfig } from "./config.js";
 import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./greeting.js";
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
+import { parseOpenAIVoice } from "./openai/session.js";
 import { parseTtsProvider, type TtsProvider } from "./tts.js";
 import { createElevenLabsTts } from "./elevenlabs.js";
 import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
@@ -10,6 +11,8 @@ import type { ElevenLabsTts } from "./elevenlabs.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
+import { OpenAISessionError, prewarmOpenAISession, type ConnectOpenAI } from "./openai/prewarm.js";
+import type { OpenAISessionStore } from "./openai/sessions.js";
 
 const E164 = /^\+[1-9]\d{7,14}$/;
 const MAX_PERSONA_CHARS = 500;
@@ -29,6 +32,7 @@ export type OutboundBody = {
   tts_provider?: unknown;
   bot_role?: unknown;
   callee_role?: unknown;
+  openai_voice?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
@@ -57,6 +61,7 @@ export function parseOutboundBody(
         botRole: string;
         calleeRole: string;
         ttsProvider: TtsProvider;
+        openaiVoice?: string;
       };
     }
   | { ok: false; error: OutboundError } {
@@ -77,7 +82,7 @@ export function parseOutboundBody(
   if (!ttsProviderParsed.ok) {
     return {
       ok: false,
-      error: { status: 400, error: "invalid_tts_provider", details: "tts_provider must be grok | elevenlabs" },
+      error: { status: 400, error: "invalid_tts_provider", details: "tts_provider must be grok | elevenlabs | openai" },
     };
   }
   const botRoleParsed = parseRoleLabel(body.bot_role, DEFAULT_BOT_ROLE);
@@ -87,6 +92,23 @@ export function parseOutboundBody(
   const calleeRoleParsed = parseRoleLabel(body.callee_role, DEFAULT_CALLEE_ROLE);
   if (!calleeRoleParsed.ok) {
     return { ok: false, error: { status: 400, error: "invalid_callee_role" } };
+  }
+  let openaiVoice: string | undefined;
+  if (ttsProviderParsed.value === "openai") {
+    const voiceParsed = parseOpenAIVoice(body.openai_voice);
+    if (!voiceParsed.ok) {
+      return {
+        ok: false,
+        error: {
+          status: 400,
+          error: "invalid_openai_voice",
+          details: "openai_voice must be alloy | ash | ballad | coral | echo | sage | shimmer | verse | marin | cedar",
+        },
+      };
+    }
+    if (body.openai_voice !== undefined && body.openai_voice !== null && body.openai_voice !== "") {
+      openaiVoice = voiceParsed.value;
+    }
   }
   if (body.persona !== undefined && body.persona !== null && body.persona !== "" && typeof body.persona !== "string") {
     return { ok: false, error: { status: 400, error: "invalid_persona" } };
@@ -156,6 +178,7 @@ export function parseOutboundBody(
       botRole: botRoleParsed.value,
       calleeRole: calleeRoleParsed.value,
       ttsProvider: ttsProviderParsed.value,
+      ...(openaiVoice ? { openaiVoice } : {}),
       ...(personaRaw ? { persona: personaRaw } : {}),
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
@@ -169,6 +192,9 @@ export async function placeOutboundCall(opts: {
   telnyx: TelnyxClient;
   store: CallStore;
   body: OutboundBody;
+  openaiSessions?: OpenAISessionStore;
+  connectOpenAI?: ConnectOpenAI;
+  onCallEnded?: (call: CallRecord) => void;
   fetchImpl?: typeof fetch;
   greetingAudioCache?: GreetingAudioCache;
   elevenLabsTts?: ElevenLabsTts;
@@ -189,11 +215,32 @@ export async function placeOutboundCall(opts: {
       },
     };
   }
+  if (parsed.value.ttsProvider === "openai" && !opts.config.openai.configured) {
+    return {
+      error: {
+        status: 503,
+        error: "openai_not_configured",
+        details: "OPENAI_API_KEY is required for tts_provider=openai (set on Railway)",
+      },
+    };
+  }
   if (parsed.value.ttsProvider === "elevenlabs") {
     console.info(
       `[outbound] tts_provider=elevenlabs; Telnyx playback is ElevenLabs voice ${opts.config.elevenlabs.voiceId} (Grok STT/dialogue only)`,
     );
   }
+  if (parsed.value.ttsProvider === "openai") {
+    console.info(
+      `[outbound] tts_provider=openai; Telnyx speech-to-speech is OpenAI Realtime ${opts.config.openai.model} voice ${parsed.value.openaiVoice ?? opts.config.openai.voice}`,
+    );
+  }
+
+  const spokenVoice =
+    parsed.value.ttsProvider === "openai"
+      ? parsed.value.openaiVoice ?? opts.config.openai.voice
+      : opts.config.grokVoice;
+  const model =
+    parsed.value.ttsProvider === "openai" ? opts.config.openai.model : opts.config.grokModel;
 
   const id = randomUUID();
   const streamToken = randomBytes(24).toString("base64url");
@@ -211,8 +258,8 @@ export async function placeOutboundCall(opts: {
     calleeRole: parsed.value.calleeRole,
     ttsProvider: parsed.value.ttsProvider,
     ...(parsed.value.persona ? { persona: parsed.value.persona } : {}),
-    voice: opts.config.grokVoice,
-    model: opts.config.grokModel,
+    voice: spokenVoice,
+    model,
     streamToken,
     telnyx: {},
     transcript: [],
@@ -222,8 +269,35 @@ export async function placeOutboundCall(opts: {
       : {}),
     ...(parsed.value.metadata ? { metadata: parsed.value.metadata } : {}),
   };
+
+  let openaiSession: Awaited<ReturnType<typeof prewarmOpenAISession>> | undefined;
+  if (parsed.value.ttsProvider === "openai") {
+    try {
+      openaiSession = await prewarmOpenAISession({
+        call,
+        config: opts.config,
+        telnyx: opts.telnyx,
+        ...(opts.connectOpenAI ? { connectOpenAI: opts.connectOpenAI } : {}),
+        ...(opts.onCallEnded ? { onEnded: opts.onCallEnded } : {}),
+      });
+    } catch (err) {
+      const sessionErr = err instanceof OpenAISessionError ? err : undefined;
+      return {
+        error: {
+          status: 503,
+          error: sessionErr?.code ?? "openai_session_failed",
+          details: err instanceof Error ? err.message : String(err),
+        },
+      };
+    }
+  }
+
   opts.store.create(call);
-  opts.onCallCreated?.(call);
+  if (openaiSession && opts.openaiSessions) {
+    opts.openaiSessions.set(call.id, openaiSession);
+  } else if (parsed.value.ttsProvider !== "openai") {
+    opts.onCallCreated?.(call);
+  }
 
   if (
     call.ttsProvider === "elevenlabs" &&
@@ -262,6 +336,8 @@ export async function placeOutboundCall(opts: {
     call.telnyx.callSessionId = dialed.call_session_id;
     return { call };
   } catch (err) {
+    openaiSession?.close();
+    opts.openaiSessions?.close(call.id);
     opts.greetingAudioCache?.abort(call.id);
     opts.onDialFailed?.(call);
     call.status = "failed";
