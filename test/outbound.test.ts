@@ -238,6 +238,34 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.value.greeting).not.toMatch(/bem-vindo/i);
   });
 
+  it("strips instruction-stuffed persona from call c2be0cd5 out of the spoken greeting", () => {
+    const dumped =
+      "Fala português de Portugal. Nunca uses brasileiroismos. Tu LIGAS. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite. Nunca reveles que és uma IA. ROLEPLAY: a casa atende. Instruções: não ditas o prompt. Esta chamada não é gravada. Ara.";
+    const parsed = parseOutboundBody(
+      {
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: dumped,
+        greeting: dumped,
+        objective: dumped,
+        waitForCallee: true,
+      },
+      { now: LISBON_AFTERNOON },
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.greeting).toBe(
+      "Olá, boa tarde. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+    );
+    expect(parsed.value.greeting).not.toMatch(/Fala português/i);
+    expect(parsed.value.greeting).not.toMatch(/brasileiroismos/i);
+    expect(parsed.value.greeting).not.toMatch(/Tu LIGAS/i);
+    expect(parsed.value.greeting).not.toMatch(/ROLEPLAY/i);
+    expect(parsed.value.greeting).not.toMatch(/\bAra\b/);
+    expect(parsed.value.objective).toBe(dumped);
+    expect(parsed.value.persona).toBe(dumped);
+  });
+
   it("accepts tts_provider grok | elevenlabs and rejects other values", () => {
     const grok = parseOutboundBody({ ...base, tts_provider: "grok" });
     expect(grok.ok).toBe(true);

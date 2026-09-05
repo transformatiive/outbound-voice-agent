@@ -26,6 +26,7 @@ export type CalleeSpeechUnlockReason =
   | "non_empty_transcript"
   | "short_greeting"
   | "min_speech_duration"
+  | "short_answer"
   | "grace_elapsed";
 
 export type CalleeSpeechDecision =
@@ -33,7 +34,7 @@ export type CalleeSpeechDecision =
   | { unlock: true; reason: CalleeSpeechUnlockReason };
 
 const SHORT_GREETING_TOKEN =
-  /^(estou|esto|estau|alo|sim|ok|okay|hello|hi|hey|yes|yeah|yep|pois|diga|pronto|ola|wai|two|tu)$/i;
+  /^(estou|esto|estau|alo|sim|ok|okay|hello|hi|hey|yes|yeah|yep|pois|diga|pronto|ola|wai|two|tu|still|stihl|steel|steal)$/i;
 
 export function createCalleeSpeechGate(): CalleeSpeechGate {
   return {
@@ -84,7 +85,7 @@ export function isShortCalleeGreeting(text: string): boolean {
   const first = tokens[0] ?? "";
   if (
     tokens.length <= 3 &&
-    /^(estou|esto|estau|alo|ola|sim|ok|okay)$/i.test(first)
+    /^(estou|esto|estau|alo|ola|sim|ok|okay|still|stihl|hello|hi|hey)$/i.test(first)
   ) {
     return true;
   }
@@ -166,6 +167,27 @@ export function onTranscript(waiting: boolean, text: string): CalleeSpeechDecisi
   if (isShortCalleeGreeting(text)) return { unlock: true, reason: "short_greeting" };
   if (!isNonEmptyCalleeTranscript(text)) return { unlock: false, reason: "empty_transcript" };
   return { unlock: true, reason: "non_empty_transcript" };
+}
+
+/**
+ * After grace, a word-length burst of speech is enough to greet — do not wait
+ * for speech_stopped or a slow ASR transcript («Still?» for «estou»).
+ */
+export function onOngoingSpeechCheck(
+  gate: CalleeSpeechGate,
+  waiting: boolean,
+  atMs: number,
+  config: CalleeSpeechGateConfig,
+): CalleeSpeechDecision {
+  if (!waiting) return { unlock: false, reason: "not_waiting" };
+  if (inGrace(gate, atMs, config.graceMs)) return { unlock: false, reason: "grace_period" };
+  const started = gate.acceptedSpeechStartedAtMs;
+  if (started === undefined) return { unlock: false, reason: "no_accepted_utterance" };
+  if (atMs - started < config.minSpeechMs) return { unlock: false, reason: "awaiting_min_duration" };
+  gate.acceptedSpeechStartedAtMs = undefined;
+  gate.lastSpeechStartedAtMs = undefined;
+  gate.pendingPostGraceUnlock = false;
+  return { unlock: true, reason: "short_answer" };
 }
 
 export function onPostGraceCheck(

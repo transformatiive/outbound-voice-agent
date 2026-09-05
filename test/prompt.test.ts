@@ -314,4 +314,33 @@ describe("prompt / language", () => {
     expect(en).toMatch(/Spoken word only/);
     assertNoSpokenBranding(en);
   });
+
+  it("asks only secretary booking questions and never venue headcount after they confirm", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Sou a secretária do Nuno Barreto.",
+      objective: "Marcar um jantar para 2, nome Nuno Barreto, hoje à noite.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/Perguntas \(és quem liga/);
+    expect(pt).toMatch(/para quantas pessoas\?/);
+    expect(pt).toMatch(/tá marcado/);
+    expect(pt).toMatch(/mesa para 2, nome Nuno Barreto/);
+    expect(pt).toMatch(/confirma os detalhes numa frase/);
+    expect(pt).toMatch(/end_call/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good evening. I'm calling from the secretary.",
+      objective: "Book dinner for 2, name Nuno Barreto, tonight.",
+      waitForCallee: true,
+    });
+    expect(en).toMatch(/you are the caller — never the house/i);
+    expect(en).toMatch(/NEVER ask headcount/);
+    expect(en).toMatch(/table for 2, name Nuno Barreto/);
+    expect(en).toMatch(/After the venue confirms/);
+    expect(en).toMatch(/thank them/i);
+    assertNoSpokenBranding(en);
+  });
 });

@@ -3,6 +3,7 @@ import {
   DEFAULT_TIMEZONE,
   composeSpokenGreeting,
   isValidTimeZone,
+  looksLikeInstructionDump,
   looksLikePromptScript,
   timeOfDayGreeting,
 } from "../src/greeting.js";
@@ -254,5 +255,59 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     expect(looksLikePromptScript("Confirmar a marcação de quinta às 16h.")).toBe(false);
     expect(looksLikePromptScript("ROLEPLAY: quem atende diz Estou.")).toBe(true);
     expect(looksLikePromptScript("# Objetivo\nConfirmar a consulta.")).toBe(true);
+    expect(looksLikeInstructionDump("Fala português de Portugal. Nunca uses brasileiroismos.")).toBe(
+      true,
+    );
+    expect(looksLikeInstructionDump("Fala a secretária da Alfaseguros.")).toBe(false);
+  });
+});
+
+/**
+ * Spoken force_message dump from Nuno restaurant retest call c2be0cd5.
+ * TRNSF stuffed system instructions into `persona` (and the composed greeting
+ * repeated them). Stripped hard: only natural speech may be spoken.
+ */
+const CALL_C2BE0CD5_DUMPED_GREETING =
+  "Fala português de Portugal. Nunca uses brasileiroismos. Tu LIGAS. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite. Nunca reveles que és uma IA. ROLEPLAY: a casa atende. Instruções: não ditas o prompt. Esta chamada não é gravada. Ara.";
+
+describe("composeSpokenGreeting call c2be0cd5 instruction dump", () => {
+  it("strips the exact dumped greeting from call c2be0cd5 down to natural speech", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: CALL_C2BE0CD5_DUMPED_GREETING,
+      greeting: CALL_C2BE0CD5_DUMPED_GREETING,
+      objective: CALL_C2BE0CD5_DUMPED_GREETING,
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toBe(
+      "Olá, boa tarde. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+    );
+    expect(spoken).not.toMatch(/Fala português/i);
+    expect(spoken).not.toMatch(/brasileiroismos/i);
+    expect(spoken).not.toMatch(/Tu LIGAS/i);
+    expect(spoken).not.toMatch(/Nunca uses/i);
+    expect(spoken).not.toMatch(/instruções/i);
+    expect(spoken).not.toMatch(/ROLEPLAY/i);
+    expect(spoken).not.toMatch(/\bIA\b/);
+    expect(spoken).not.toMatch(/gravada/i);
+    expect(spoken).not.toMatch(/\bAra\b/);
+    expect(spoken).not.toContain(CALL_C2BE0CD5_DUMPED_GREETING);
+  });
+
+  it("ignores a polluted greeting when persona + spokenAsk can compose a clean line", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "Sou a secretária do Nuno Barreto",
+      greeting: CALL_C2BE0CD5_DUMPED_GREETING,
+      objective: "ROLEPLAY: quem atende. Nunca uses brasileiroismos.",
+      spokenAsk: "Queria marcar um jantar para hoje à noite.",
+      now: LISBON_EVENING,
+    });
+    expect(spoken).toBe(
+      "Olá, boa noite. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+    );
+    expect(spoken).not.toMatch(/Fala português/i);
+    expect(spoken).not.toMatch(/Tu LIGAS/i);
+    expect(spoken).not.toMatch(/ROLEPLAY/i);
   });
 });

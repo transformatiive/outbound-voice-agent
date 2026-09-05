@@ -13,6 +13,7 @@ import {
   onSpeechStarted,
   onSpeechStopped,
   onTranscript,
+  onOngoingSpeechCheck,
 } from "../src/bridge/callee-speech.js";
 
 const config = {
@@ -49,6 +50,11 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(isShortCalleeGreeting("sim")).toBe(true);
     expect(isShortCalleeGreeting("ok")).toBe(true);
     expect(isShortCalleeGreeting("hello")).toBe(true);
+    expect(isShortCalleeGreeting("Hello?")).toBe(true);
+    expect(isShortCalleeGreeting("Still?")).toBe(true);
+    expect(isShortCalleeGreeting("still")).toBe(true);
+    expect(isShortCalleeGreeting("Esto?")).toBe(true);
+    expect(isShortCalleeGreeting("esto")).toBe(true);
     expect(isShortCalleeGreeting("Two")).toBe(true);
     expect(isShortCalleeGreeting("Confirmar a marcação de quinta")).toBe(false);
   });
@@ -137,6 +143,9 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(onTranscript(true, "Sim.")).toEqual({ unlock: true, reason: "short_greeting" });
     expect(onTranscript(true, "ok")).toEqual({ unlock: true, reason: "short_greeting" });
     expect(onTranscript(true, "hello")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "Hello?")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "Still?")).toEqual({ unlock: true, reason: "short_greeting" });
+    expect(onTranscript(true, "Esto?")).toEqual({ unlock: true, reason: "short_greeting" });
   });
 
   it("unlocks on first non-empty transcript even during grace", () => {
@@ -207,5 +216,29 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(during).toEqual({ unlock: false, reason: "grace_period" });
     expect(hasPendingPostGraceUnlock(gate)).toBe(true);
     expect(onPostGraceCheck(gate, true, 500, config)).toEqual({ unlock: true, reason: "grace_elapsed" });
+  });
+
+  it("unlocks a post-grace short answer after min speech without waiting for ASR", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 600, config);
+    expect(onOngoingSpeechCheck(gate, true, 650, config)).toEqual({
+      unlock: false,
+      reason: "awaiting_min_duration",
+    });
+    expect(onOngoingSpeechCheck(gate, true, 680, config)).toEqual({
+      unlock: true,
+      reason: "short_answer",
+    });
+  });
+
+  it("does not short-answer-unlock speech that started during grace", () => {
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    onSpeechStarted(gate, true, 200, config);
+    expect(onOngoingSpeechCheck(gate, true, 700, config)).toEqual({
+      unlock: false,
+      reason: "no_accepted_utterance",
+    });
   });
 });
