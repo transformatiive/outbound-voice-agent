@@ -48,6 +48,7 @@ export async function fillPcmuFrameBuffer(
     tts: ElevenLabsTts;
     text: string;
     language: Language;
+    callId?: string;
     onHttpStart?: () => void;
     onFirstByte?: () => void;
   },
@@ -73,7 +74,8 @@ export async function fillPcmuFrameBuffer(
       return;
     }
     buffer.finish(true);
-    console.error("elevenlabs prefetch", err);
+    const call = opts.callId ? ` call=${opts.callId}` : "";
+    console.error(`[elevenlabs] greeting prefetch failed${call}`, err);
   }
 }
 
@@ -134,6 +136,7 @@ export class GreetingAudioCache {
       tts: opts.tts,
       text: opts.text,
       language: opts.language,
+      callId: opts.callId,
       ...(opts.onHttpStart ? { onHttpStart: opts.onHttpStart } : {}),
       ...(opts.onFirstByte ? { onFirstByte: opts.onFirstByte } : {}),
     });

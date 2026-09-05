@@ -1,6 +1,7 @@
 import type { Language } from "./prompt.js";
 import {
   DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+  elevenLabsModelSupportsOptimizeStreamingLatency,
   type ElevenLabsConfig,
 } from "./tts.js";
 
@@ -20,6 +21,12 @@ export type ElevenLabsSpeakInput = {
 
 export type ElevenLabsTts = {
   speakToPcmu: (input: ElevenLabsSpeakInput) => AsyncIterable<string>;
+};
+
+export type ElevenLabsRequestState = {
+  format?: ElevenLabsOutputFormat;
+  omitOptimizeStreamingLatency?: boolean;
+  loggedOptimizeOmit?: boolean;
 };
 
 const MULAW_BIAS = 0x84;
@@ -131,7 +138,7 @@ export function createElevenLabsTts(
   config: ElevenLabsConfig,
   fetchImpl: typeof fetch = fetch,
 ): ElevenLabsTts {
-  const formatCache: { format?: ElevenLabsOutputFormat } = {};
+  const formatCache: ElevenLabsRequestState = {};
   return {
     speakToPcmu: (input) => streamElevenLabsPcmu({ config, fetchImpl, formatCache, ...input }),
   };
@@ -143,7 +150,7 @@ export async function* streamElevenLabsPcmu(opts: {
   language: Language;
   signal: AbortSignal;
   fetchImpl?: typeof fetch;
-  formatCache?: { format?: ElevenLabsOutputFormat };
+  formatCache?: ElevenLabsRequestState;
   onHttpStart?: () => void;
   onFirstByte?: () => void;
 }): AsyncGenerator<string, void, unknown> {
@@ -192,25 +199,68 @@ export async function* streamElevenLabsPcmu(opts: {
   }
 }
 
+export function elevenLabsOptimizeLatencyRejected(status: number, body: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  return body.toLowerCase().includes("optimize_streaming_latency");
+}
+
+export function elevenLabsStreamUrl(
+  config: ElevenLabsConfig,
+  format: ElevenLabsOutputFormat,
+  includeOptimizeStreamingLatency: boolean,
+): string {
+  let url =
+    `${ELEVENLABS_API_BASE}/v1/text-to-speech/${encodeURIComponent(config.voiceId)}/stream` +
+    `?output_format=${format}`;
+  if (!includeOptimizeStreamingLatency) return url;
+  const latency = config.optimizeStreamingLatency ?? DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY;
+  if (latency > 0) url += `&optimize_streaming_latency=${latency}`;
+  return url;
+}
+
+function shouldIncludeOptimizeStreamingLatency(
+  config: ElevenLabsConfig,
+  state: ElevenLabsRequestState | undefined,
+): boolean {
+  if (state?.omitOptimizeStreamingLatency === true) return false;
+  if (!elevenLabsModelSupportsOptimizeStreamingLatency(config.model)) return false;
+  const latency = config.optimizeStreamingLatency ?? DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY;
+  return latency > 0;
+}
+
+function noteOmittingOptimize(config: ElevenLabsConfig, state: ElevenLabsRequestState | undefined): void {
+  if (state?.loggedOptimizeOmit) return;
+  const reason = state?.omitOptimizeStreamingLatency
+    ? "previous_unsupported_model_400"
+    : elevenLabsModelSupportsOptimizeStreamingLatency(config.model)
+      ? "optimize_disabled"
+      : "model_does_not_support";
+  console.info(
+    `[elevenlabs] omitting optimize_streaming_latency model=${config.model} reason=${reason}`,
+  );
+  if (state) state.loggedOptimizeOmit = true;
+}
+
 async function requestElevenLabsAudio(opts: {
   config: ElevenLabsConfig;
   text: string;
   language: Language;
   signal: AbortSignal;
   fetchImpl: typeof fetch;
-  formatCache?: { format?: ElevenLabsOutputFormat };
+  formatCache?: ElevenLabsRequestState;
 }): Promise<{ response: Response; format: ElevenLabsOutputFormat }> {
   let lastStatus = 0;
   let lastBody = "";
-  const cached = opts.formatCache?.format;
+  const state = opts.formatCache;
+  const cached = state?.format;
   const formats: ElevenLabsOutputFormat[] = cached
     ? [cached]
     : [...ELEVENLABS_OUTPUT_FORMATS];
-  for (const format of formats) {
-    if (opts.signal.aborted) {
-      throw abortError();
-    }
-    const response = await opts.fetchImpl(elevenLabsStreamUrl(opts.config, format), {
+  let includeOptimize = shouldIncludeOptimizeStreamingLatency(opts.config, state);
+  if (!includeOptimize) noteOmittingOptimize(opts.config, state);
+
+  const post = (format: ElevenLabsOutputFormat, withOptimize: boolean): Promise<Response> =>
+    opts.fetchImpl(elevenLabsStreamUrl(opts.config, format, withOptimize), {
       method: "POST",
       headers: {
         "xi-api-key": opts.config.apiKey,
@@ -224,12 +274,43 @@ async function requestElevenLabsAudio(opts: {
       }),
       signal: opts.signal,
     });
+
+  for (const format of formats) {
+    if (opts.signal.aborted) {
+      throw abortError();
+    }
+    const response = await post(format, includeOptimize);
     if (response.ok) {
-      if (opts.formatCache) opts.formatCache.format = format;
+      if (state) state.format = format;
       return { response, format };
     }
     lastStatus = response.status;
     lastBody = await response.text().catch(() => "");
+    if (includeOptimize && elevenLabsOptimizeLatencyRejected(lastStatus, lastBody)) {
+      includeOptimize = false;
+      if (state) {
+        state.omitOptimizeStreamingLatency = true;
+        state.loggedOptimizeOmit = true;
+      }
+      console.warn(
+        `[elevenlabs] optimize_streaming_latency rejected model=${opts.config.model} HTTP ${lastStatus}; retrying without the param`,
+      );
+      if (opts.signal.aborted) throw abortError();
+      const retried = await post(format, false);
+      if (retried.ok) {
+        if (state) state.format = format;
+        return { response: retried, format };
+      }
+      lastStatus = retried.status;
+      lastBody = await retried.text().catch(() => "");
+      if (retried.status === 401 || retried.status === 403 || retried.status === 404) {
+        break;
+      }
+      if (retried.status !== 400 && retried.status !== 415 && retried.status !== 422) {
+        break;
+      }
+      continue;
+    }
     if (response.status === 401 || response.status === 403 || response.status === 404) {
       break;
     }
@@ -238,15 +319,6 @@ async function requestElevenLabsAudio(opts: {
     }
   }
   throw new Error(`elevenlabs_tts_failed: HTTP ${lastStatus} ${lastBody.slice(0, 200)}`);
-}
-
-function elevenLabsStreamUrl(config: ElevenLabsConfig, format: ElevenLabsOutputFormat): string {
-  const latency = config.optimizeStreamingLatency ?? DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY;
-  let url =
-    `${ELEVENLABS_API_BASE}/v1/text-to-speech/${encodeURIComponent(config.voiceId)}/stream` +
-    `?output_format=${format}`;
-  if (latency > 0) url += `&optimize_streaming_latency=${latency}`;
-  return url;
 }
 
 function abortError(): Error {

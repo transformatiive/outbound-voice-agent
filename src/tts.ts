@@ -5,7 +5,7 @@ export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
 /** Benedita. 20-char voice id (`Ten`, not `Ln`). Override with ELEVENLABS_VOICE_ID. */
 export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezTenCDRKHkWiX";
-/** ElevenLabs stream URL `optimize_streaming_latency` (0–4). 4 is faster/lower quality. */
+/** ElevenLabs stream URL `optimize_streaming_latency` (0–4). Used only on models that accept it. */
 export const DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY = 3;
 /** Shared server_vad end-of-turn silence for every TTS provider (Grok, ElevenLabs, OpenAI). */
 export const DEFAULT_ELEVENLABS_VAD_SILENCE_MS = 130;
@@ -50,6 +50,19 @@ export function parseTtsProvider(value: unknown): { ok: true; value: TtsProvider
       return { ok: false };
     }
   }
+}
+
+/**
+ * `optimize_streaming_latency` is accepted on flash / turbo / multilingual_v2.
+ * `eleven_v3` (the default) rejects it with HTTP 400 `unsupported_model`, which
+ * emptied the greeting cache and left the callee muted on unlock.
+ */
+export function elevenLabsModelSupportsOptimizeStreamingLatency(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (m.includes("flash") || m.includes("turbo")) return true;
+  if (m.includes("multilingual_v2")) return true;
+  return false;
 }
 
 export function elevenlabsConfigFromEnv(env: Record<string, string | undefined>): ElevenLabsConfig {
