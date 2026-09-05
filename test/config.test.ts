@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID, elevenLabsAudioPathActive } from "../src/tts.js";
+import {
+  DEFAULT_ELEVENLABS_MODEL,
+  DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+  DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
+  DEFAULT_ELEVENLABS_VOICE_ID,
+  elevenLabsAudioPathActive,
+} from "../src/tts.js";
 
 describe("config", () => {
   it("defaults caller ID, Grok voice ara, Live 2 model, and Telnyx app/OVP ids", () => {
@@ -23,19 +29,24 @@ describe("config", () => {
       prefixPaddingMs: 200,
       idleTimeoutMs: 12_000,
     });
-    expect(cfg.calleeSpeechGraceMs).toBe(500);
+    expect(cfg.calleeSpeechGraceMs).toBe(350);
     expect(cfg.calleeMinSpeechMs).toBe(80);
     expect(cfg.hangupPlayoutBufferMs).toBe(1000);
+    expect(cfg.elevenlabsVadSilenceMs).toBe(130);
     expect(cfg.elevenlabs).toEqual({
       apiKey: "",
       voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
       model: DEFAULT_ELEVENLABS_MODEL,
       configured: false,
+      optimizeStreamingLatency: DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
     });
     expect(cfg.ready.elevenlabs).toBe(false);
     expect(elevenLabsAudioPathActive(cfg.elevenlabs)).toBe(false);
-    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezLnCDRKHkWiX");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezTenCDRKHkWiX");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toHaveLength(20);
     expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
+    expect(DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY).toBe(3);
+    expect(DEFAULT_ELEVENLABS_VAD_SILENCE_MS).toBe(130);
   });
 
   it("honors GROK_VAD_* env overrides and clamps them", () => {
@@ -125,10 +136,27 @@ describe("config", () => {
       voiceId: "el-voice",
       model: "multilingual_v2",
       configured: true,
+      optimizeStreamingLatency: DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
     });
     expect(overridden.ready.elevenlabs).toBe(true);
     expect(overridden.grokVoice).toBe("ara");
     expect(overridden.grokVoiceSpeed).toBe(1.05);
+
+    const elLatency = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      ELEVENLABS_API_KEY: "el-key",
+      ELEVENLABS_OPTIMIZE_STREAMING_LATENCY: "4",
+      ELEVENLABS_VAD_SILENCE_MS: "120",
+      ELEVENLABS_MODEL: "eleven_flash_v2_5",
+    });
+    expect(elLatency.elevenlabs.model).toBe("eleven_flash_v2_5");
+    expect(elLatency.elevenlabs.optimizeStreamingLatency).toBe(4);
+    expect(elLatency.elevenlabsVadSilenceMs).toBe(120);
+    expect(elLatency.turnDetection.silenceDurationMs).toBe(160);
+    expect(elLatency.grokVoiceSpeed).toBe(1.05);
   });
 
   it("builds webhook and media stream URLs from PUBLIC_BASE_URL", () => {

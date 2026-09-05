@@ -28,6 +28,7 @@ const config: AppConfig = {
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
   hangupPlayoutBufferMs: 0,
+  elevenlabsVadSilenceMs: 130,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,
@@ -319,7 +320,7 @@ describe("media stream websocket", () => {
       ...config,
       elevenlabs: {
         apiKey: "el-key",
-        voiceId: "NkpT2jezLnCDRKHkWiX",
+        voiceId: "NkpT2jezTenCDRKHkWiX",
         model: "eleven_v3",
         configured: true,
       },
@@ -365,6 +366,10 @@ describe("media stream websocket", () => {
 
       const grokWs = await grokConnection;
       await waitFor(grokFromApp, (m) => m.type === "session.update");
+      const sessionUpdate = grokFromApp.find((m) => m.type === "session.update") as {
+        session?: { turn_detection?: { silence_duration_ms?: number } };
+      };
+      expect(sessionUpdate.session?.turn_detection?.silence_duration_ms).toBe(130);
       grokWs.send(JSON.stringify({ type: "session.updated" }));
       await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
 
@@ -373,8 +378,9 @@ describe("media stream websocket", () => {
         event: "media",
         media: { payload: elPcmu.toString("base64") },
       });
-      expect(elCalls[0]?.url).toContain("NkpT2jezLnCDRKHkWiX");
+      expect(elCalls[0]?.url).toContain("NkpT2jezTenCDRKHkWiX");
       expect(elCalls[0]?.url).toContain("output_format=ulaw_8000");
+      expect(elCalls[0]?.url).toContain("optimize_streaming_latency=3");
       expect(elCalls[0]?.body).toContain(call.greeting);
 
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));

@@ -61,7 +61,7 @@ describe("ElevenLabs HTTP TTS", () => {
     const payload = Buffer.alloc(160, 0x7f);
     const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
       expect(String(url)).toBe(
-        `${ELEVENLABS_API_BASE}/v1/text-to-speech/${DEFAULT_ELEVENLABS_VOICE_ID}/stream?output_format=ulaw_8000`,
+        `${ELEVENLABS_API_BASE}/v1/text-to-speech/${DEFAULT_ELEVENLABS_VOICE_ID}/stream?output_format=ulaw_8000&optimize_streaming_latency=3`,
       );
       expect((init?.headers as Record<string, string>)["xi-api-key"]).toBe("el-key");
       const body = JSON.parse(String(init?.body));
@@ -105,7 +105,7 @@ describe("ElevenLabs HTTP TTS", () => {
     for await (const frame of streamElevenLabsPcmu({
       config: {
         apiKey: "el-key",
-        voiceId: "NkpT2jezLnCDRKHkWiX",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
         model: "eleven_v3",
         configured: true,
       },
@@ -118,6 +118,82 @@ describe("ElevenLabs HTTP TTS", () => {
     }
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(Buffer.from(frames.join(""), "base64").length).toBe(160);
+  });
+
+  it("emits a Telnyx frame as soon as the first ulaw bytes arrive", () => {
+    const encoder = new PcmuStreamEncoder("ulaw_8000");
+    const first = encoder.push(Buffer.alloc(40, 0xaa));
+    expect(first).toEqual([Buffer.alloc(40, 0xaa).toString("base64")]);
+    expect(encoder.push(Buffer.alloc(80, 0xbb))).toEqual([]);
+    const next = encoder.push(Buffer.alloc(80, 0xcc));
+    expect(next).toEqual([Buffer.concat([Buffer.alloc(80, 0xbb), Buffer.alloc(80, 0xcc)]).toString("base64")]);
+  });
+
+  it("notifies onHttpStart then onFirstByte as soon as the HTTP body has audio", async () => {
+    const stages: string[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Uint8Array.from(Buffer.alloc(40, 0x7f)));
+        controller.close();
+      },
+    });
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response(stream, { status: 200 }));
+    const frames: string[] = [];
+    for await (const frame of streamElevenLabsPcmu({
+      config: {
+        apiKey: "el-key",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+        model: DEFAULT_ELEVENLABS_MODEL,
+        configured: true,
+      },
+      text: "Olá.",
+      language: "pt-PT",
+      signal: new AbortController().signal,
+      fetchImpl,
+      onHttpStart: () => stages.push("http"),
+      onFirstByte: () => stages.push("byte"),
+    })) {
+      frames.push(frame);
+    }
+    expect(stages).toEqual(["http", "byte"]);
+    expect(frames.length).toBeGreaterThan(0);
+  });
+
+  it("caches the first successful output format for later utterances", async () => {
+    const pcm = pcm16(Array.from({ length: 160 }, () => 0));
+    const fetchImpl = vi.fn<typeof fetch>(async (url) => {
+      const u = String(url);
+      if (u.includes("ulaw_8000")) return new Response("unsupported format", { status: 400 });
+      if (u.includes("pcm_8000")) return new Response(pcm, { status: 200 });
+      return new Response("unsupported format", { status: 400 });
+    });
+    const tts = createElevenLabsTts(
+      {
+        apiKey: "el-key",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+        model: DEFAULT_ELEVENLABS_MODEL,
+        configured: true,
+      },
+      fetchImpl,
+    );
+    async function speakOnce(): Promise<void> {
+      for await (const _frame of tts.speakToPcmu({
+        text: "Olá.",
+        language: "pt-PT",
+        signal: new AbortController().signal,
+      })) {
+        /* drain */
+      }
+    }
+    await speakOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("output_format=ulaw_8000");
+    expect(String(fetchImpl.mock.calls[1]?.[0])).toContain("output_format=pcm_8000");
+    fetchImpl.mockClear();
+    await speakOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain("output_format=pcm_8000");
+    expect(String(fetchImpl.mock.calls[0]?.[0])).not.toContain("ulaw_8000");
   });
 
   it("createElevenLabsTts speaks via speakToPcmu", async () => {

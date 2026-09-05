@@ -25,6 +25,7 @@ const config: AppConfig = {
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
   hangupPlayoutBufferMs: 0,
+  elevenlabsVadSilenceMs: 130,
   publicBaseUrl: "https://example.up.railway.app",
   resultWebhook: undefined,
   maxCallSeconds: 600,

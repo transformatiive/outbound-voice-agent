@@ -1,6 +1,10 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
 import type { ElevenLabsTts } from "../elevenlabs.js";
 import {
+  remainingUnspoken,
+  takeCompleteSentences,
+} from "./speakable-text.js";
+import {
   DEFAULT_OUTPUT_SPEED,
   DEFAULT_TURN_DETECTION,
   sessionUpdatePayload,
@@ -31,6 +35,16 @@ export type JsonObject = Record<string, unknown>;
 export const DEFAULT_HANGUP_PLAYOUT_BUFFER_MS = 1000;
 export const DEFAULT_HANGUP_MAX_WAIT_MS = 15_000;
 const PCMU_BYTES_PER_MS = 8;
+
+type ElLatencyTrace = {
+  kind: "greeting" | "turn";
+  unlockAtMs?: number;
+  speechStoppedAtMs?: number;
+  transcriptAtMs?: number;
+  httpStartAtMs?: number;
+  firstByteAtMs?: number;
+  firstTelnyxAtMs?: number;
+};
 
 export type MediaBridgeOptions = {
   call: CallRecord;
@@ -86,6 +100,13 @@ export class MediaBridge {
   private greetingResponseId = "";
   private lastElSpokenText = "";
   private readonly elSpokenResponseIds = new Set<string>();
+  private readonly elSpokenPrefixByResponse = new Map<string, string>();
+  private elTranscriptBuf = "";
+  private elTranscriptResponseId = "";
+  private elPlayResponseId = "";
+  private elPendingTail = "";
+  private lastSpeechStoppedAtMs: number | undefined;
+  private elTrace: ElLatencyTrace | undefined;
   private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
     playMs: 0,
     firstDeltaAtMs: undefined,
@@ -143,10 +164,28 @@ export class MediaBridge {
   speakGreeting(): void {
     if (this.greetingSent) return;
     const wasWaiting = this.call.waitForCallee === true;
-    if (wasWaiting) this.cancelPendingGrokResponse();
+    const unlockAtMs = this.clockMs();
     this.greetingSent = true;
     this.greetingPlaying = true;
     if (wasWaiting) this.suppressUntilNextCalleeSpeech = true;
+    this.suppressAssistantAudio = false;
+    this.greetingGrokDone = false;
+    const elClientReady = this.wantsElevenLabsPlayback() && this.elevenLabsTts !== undefined;
+    this.greetingElDone = !elClientReady;
+    if (this.wantsElevenLabsPlayback()) {
+      if (this.elevenLabsTts) {
+        this.beginElTrace("greeting", { unlockAtMs });
+        this.logElStage("unlock", {
+          ms_since_stream: msSinceStreamStart(this.calleeGate, unlockAtMs),
+        });
+        void this.playElevenLabs(this.call.greeting, { isGreeting: true });
+      } else {
+        console.error(
+          `[bridge ${this.call.id}] tts_provider=elevenlabs but TTS client missing; not falling back to Grok ara`,
+        );
+      }
+    }
+    if (wasWaiting) this.cancelPendingGrokResponse();
     if (wasWaiting) this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     this.sendGrok({
@@ -158,19 +197,6 @@ export class MediaBridge {
         content: [{ type: "output_text", text: this.call.greeting }],
       },
     });
-    this.suppressAssistantAudio = false;
-    this.greetingGrokDone = false;
-    const elClientReady = this.wantsElevenLabsPlayback() && this.elevenLabsTts !== undefined;
-    this.greetingElDone = !elClientReady;
-    if (this.wantsElevenLabsPlayback()) {
-      if (this.elevenLabsTts) {
-        void this.playElevenLabs(this.call.greeting, { isGreeting: true });
-      } else {
-        console.error(
-          `[bridge ${this.call.id}] tts_provider=elevenlabs but TTS client missing; not falling back to Grok ara`,
-        );
-      }
-    }
     // Keep create_response false while the scripted greeting plays so the model
     // cannot immediately re-introduce itself. Instructions switch to "already delivered".
     this.configureGrokSession();
@@ -252,6 +278,10 @@ export class MediaBridge {
         if (waiting) {
           this.logCalleeGate(decision, "speech_stopped");
           if (decision.unlock) this.speakGreeting();
+        } else if (this.wantsElevenLabsPlayback() && this.greetingSent) {
+          this.lastSpeechStoppedAtMs = this.clockMs();
+          this.beginElTrace("turn", { speechStoppedAtMs: this.lastSpeechStoppedAtMs });
+          this.logElStage("speech_stopped");
         }
         return;
       }
@@ -270,6 +300,14 @@ export class MediaBridge {
           return;
         }
         if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+        return;
+      }
+      case "response.output_audio_transcript.delta":
+      case "response.audio_transcript.delta":
+      case "response.output_text.delta":
+      case "response.text.delta": {
+        if (this.isWaitingForCalleeSpeech()) return;
+        this.onAssistantTranscriptDelta(event);
         return;
       }
       case "response.output_audio_transcript.done":
@@ -500,6 +538,11 @@ export class MediaBridge {
     this.elAbort = undefined;
     this.elInFlight = false;
     this.elExpectingUtterance = false;
+    this.elPendingTail = "";
+    this.elTranscriptBuf = "";
+    this.elTranscriptResponseId = "";
+    this.elPlayResponseId = "";
+    this.elTrace = undefined;
     if (this.wantsElevenLabsPlayback()) {
       this.turnAudio.done = true;
     }
@@ -527,11 +570,93 @@ export class MediaBridge {
     if (this.suppressAssistantAudio) return;
     const trimmed = text.trim();
     if (!trimmed) return;
-    if (responseId && (responseId === this.greetingResponseId || this.elSpokenResponseIds.has(responseId))) {
+    if (responseId && responseId === this.greetingResponseId) return;
+    const spoken = responseId ? (this.elSpokenPrefixByResponse.get(responseId) ?? "") : this.lastElSpokenText;
+    const remaining = remainingUnspoken(trimmed, spoken);
+    if (!remaining) return;
+    if (remaining === this.call.greeting) return;
+    this.markAssistantTranscript(responseId, remaining);
+    this.logTranscriptStage(responseId);
+    this.enqueueOrPlayElevenLabs(remaining, { responseId });
+  }
+
+  private onAssistantTranscriptDelta(event: JsonObject): void {
+    if (!this.wantsElevenLabsPlayback() || !this.elevenLabsTts) return;
+    if (!this.greetingSent || this.greetingPlaying) return;
+    if (this.suppressAssistantAudio) return;
+    const responseId = responseIdFromEvent(event);
+    if (responseId && responseId === this.greetingResponseId) return;
+    this.appendAssistantDelta(event, responseId);
+    const { complete } = takeCompleteSentences(this.elTranscriptBuf);
+    if (complete.length === 0) return;
+    const spoken = responseId ? (this.elSpokenPrefixByResponse.get(responseId) ?? "") : this.lastElSpokenText;
+    const remaining = remainingUnspoken(complete.join(" "), spoken);
+    if (!remaining) return;
+    this.markAssistantTranscript(responseId, remaining);
+    this.logTranscriptStage(responseId);
+    this.enqueueOrPlayElevenLabs(remaining, { responseId });
+  }
+
+  private appendAssistantDelta(event: JsonObject, responseId: string): void {
+    if (responseId && responseId !== this.elTranscriptResponseId) {
+      this.elTranscriptResponseId = responseId;
+      this.elTranscriptBuf = "";
+    }
+    const delta = typeof event.delta === "string" ? event.delta : "";
+    const snapshot = assistantTextFromEvent(event);
+    if (delta) {
+      this.elTranscriptBuf += delta;
       return;
     }
-    if (trimmed === this.call.greeting || trimmed === this.lastElSpokenText) return;
-    void this.playElevenLabs(trimmed, { responseId });
+    if (snapshot.length > this.elTranscriptBuf.length) this.elTranscriptBuf = snapshot;
+  }
+
+  private markAssistantTranscript(responseId: string, spokenChunk: string): void {
+    const trimmed = spokenChunk.trim();
+    if (!trimmed) return;
+    this.lastElSpokenText = trimmed;
+    if (!responseId) return;
+    const prev = this.elSpokenPrefixByResponse.get(responseId) ?? "";
+    const next = [prev, trimmed].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    this.elSpokenPrefixByResponse.set(responseId, next);
+    this.elSpokenResponseIds.add(responseId);
+  }
+
+  private logTranscriptStage(responseId: string): void {
+    if (!this.wantsElevenLabsPlayback()) return;
+    const now = this.clockMs();
+    if (!this.elTrace || this.elTrace.kind === "greeting") {
+      const extra: Partial<ElLatencyTrace> = { transcriptAtMs: now };
+      if (this.lastSpeechStoppedAtMs !== undefined) {
+        extra.speechStoppedAtMs = this.lastSpeechStoppedAtMs;
+      }
+      this.beginElTrace("turn", extra);
+    } else {
+      this.elTrace.transcriptAtMs ??= now;
+    }
+    const trace = this.elTrace;
+    this.logElStage("transcript", {
+      ...(responseId ? { response_id: responseId } : {}),
+      speech_stopped_to_transcript_ms: deltaMs(trace?.speechStoppedAtMs, now),
+    });
+  }
+
+  private enqueueOrPlayElevenLabs(
+    text: string,
+    opts: { isGreeting?: boolean; responseId?: string } = {},
+  ): void {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (
+      this.elInFlight &&
+      opts.responseId &&
+      opts.responseId === this.elPlayResponseId &&
+      opts.isGreeting !== true
+    ) {
+      this.elPendingTail = [this.elPendingTail, trimmed].filter(Boolean).join(" ");
+      return;
+    }
+    void this.playElevenLabs(trimmed, opts);
   }
 
   private async playElevenLabs(
@@ -548,14 +673,23 @@ export class MediaBridge {
     this.elAbort = abort;
     this.elInFlight = true;
     this.elExpectingUtterance = false;
+    if (!opts.responseId || opts.responseId !== this.elPlayResponseId) {
+      this.elPendingTail = "";
+    }
     this.beginTurnAudio();
-    if (opts.responseId) this.elSpokenResponseIds.add(opts.responseId);
+    if (opts.responseId) {
+      this.elSpokenResponseIds.add(opts.responseId);
+      this.elPlayResponseId = opts.responseId;
+    }
     this.lastElSpokenText = trimmed;
+    let firstTelnyxSent = false;
     try {
       for await (const chunk of this.elevenLabsTts.speakToPcmu({
         text: trimmed,
         language: this.call.language,
         signal: abort.signal,
+        onHttpStart: () => this.noteElHttpStart(),
+        onFirstByte: () => this.noteElFirstByte(),
       })) {
         if (generation !== this.elGeneration || abort.signal.aborted || this.suppressAssistantAudio) {
           return;
@@ -563,6 +697,10 @@ export class MediaBridge {
         if (chunk.length > 0) {
           this.noteTurnAudio(chunk);
           this.sendTelnyx({ event: "media", media: { payload: chunk } });
+          if (!firstTelnyxSent) {
+            firstTelnyxSent = true;
+            this.noteFirstTelnyxMedia();
+          }
         }
       }
     } catch (err) {
@@ -577,8 +715,73 @@ export class MediaBridge {
           this.greetingElDone = true;
           this.maybeFinishGreetingPlayback();
         }
+        const tail = this.elPendingTail;
+        this.elPendingTail = "";
+        if (tail && !abort.signal.aborted && !this.suppressAssistantAudio) {
+          void this.playElevenLabs(
+            tail,
+            opts.responseId ? { responseId: opts.responseId } : {},
+          );
+        }
       }
     }
+  }
+
+  private beginElTrace(kind: ElLatencyTrace["kind"], extra: Partial<ElLatencyTrace> = {}): void {
+    this.elTrace = { kind, ...extra };
+  }
+
+  private noteElHttpStart(): void {
+    const now = this.clockMs();
+    if (!this.elTrace) this.beginElTrace("turn");
+    const trace = this.elTrace;
+    if (!trace || trace.httpStartAtMs !== undefined) return;
+    trace.httpStartAtMs = now;
+    this.logElStage("el_http_start", {
+      since_unlock_ms: deltaMs(trace.unlockAtMs, now),
+      since_transcript_ms: deltaMs(trace.transcriptAtMs, now),
+    });
+  }
+
+  private noteElFirstByte(): void {
+    const now = this.clockMs();
+    if (!this.elTrace) this.beginElTrace("turn");
+    const trace = this.elTrace;
+    if (!trace || trace.firstByteAtMs !== undefined) return;
+    trace.firstByteAtMs = now;
+    this.logElStage("el_first_byte", {
+      since_unlock_ms: deltaMs(trace.unlockAtMs, now),
+      since_http_ms: deltaMs(trace.httpStartAtMs, now),
+    });
+  }
+
+  private noteFirstTelnyxMedia(): void {
+    const now = this.clockMs();
+    if (!this.elTrace) this.beginElTrace("turn");
+    const trace = this.elTrace;
+    if (!trace || trace.firstTelnyxAtMs !== undefined) return;
+    trace.firstTelnyxAtMs = now;
+    this.logElStage("first_telnyx_media_frame", {
+      since_unlock_ms: deltaMs(trace.unlockAtMs, now),
+      since_first_byte_ms: deltaMs(trace.firstByteAtMs, now),
+    });
+    this.logElStage("summary", {
+      unlock_to_http_ms: deltaMs(trace.unlockAtMs, trace.httpStartAtMs),
+      http_to_first_byte_ms: deltaMs(trace.httpStartAtMs, trace.firstByteAtMs),
+      first_byte_to_telnyx_ms: deltaMs(trace.firstByteAtMs, now),
+      unlock_to_telnyx_ms: deltaMs(trace.unlockAtMs, now),
+      speech_stopped_to_transcript_ms: deltaMs(trace.speechStoppedAtMs, trace.transcriptAtMs),
+      transcript_to_telnyx_ms: deltaMs(trace.transcriptAtMs, now),
+    });
+  }
+
+  private logElStage(stage: string, extra: Record<string, number | string | undefined> = {}): void {
+    const parts = [`stage=${stage}`, `turn=${this.elTrace?.kind ?? "turn"}`];
+    for (const [key, value] of Object.entries(extra)) {
+      if (value === undefined || value === "") continue;
+      parts.push(`${key}=${value}`);
+    }
+    console.info(`[bridge ${this.call.id}] el_latency ${parts.join(" ")}`);
   }
 
   private flushResponseDoneWaiters(): void {
@@ -690,6 +893,11 @@ function responseIdFromEvent(event: JsonObject): string {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function deltaMs(from: number | undefined, to: number | undefined): number | undefined {
+  if (from === undefined || to === undefined) return undefined;
+  return Math.max(0, to - from);
 }
 
 export function pcmuPlayoutMsFromBase64(base64: string): number {

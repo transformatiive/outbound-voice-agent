@@ -8,6 +8,7 @@ import type { TelnyxClient } from "../telnyx/client.js";
 import { grokRealtimeUrl } from "../grok/session.js";
 import { MediaBridge, type JsonObject } from "./media-bridge.js";
 import { createElevenLabsTts } from "../elevenlabs.js";
+import { DEFAULT_ELEVENLABS_VAD_SILENCE_MS } from "../tts.js";
 import type { CallRecord } from "../calls/types.js";
 
 export type MediaStreamDeps = {
@@ -69,13 +70,21 @@ async function handleMediaConnection(
       ? createElevenLabsTts(deps.config.elevenlabs, deps.fetchImpl ?? fetch)
       : undefined;
 
+  const turnDetection = elevenLabsRequested
+    ? {
+        ...deps.config.turnDetection,
+        silenceDurationMs:
+          deps.config.elevenlabsVadSilenceMs ?? DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
+      }
+    : deps.config.turnDetection;
+
   const bridge = new MediaBridge({
     call,
     sendGrok,
     sendTelnyx,
     telnyx: deps.telnyx,
     voice: deps.config.grokVoice,
-    turnDetection: deps.config.turnDetection,
+    turnDetection,
     outputSpeed: deps.config.grokVoiceSpeed,
     calleeSpeechGraceMs: deps.config.calleeSpeechGraceMs,
     calleeMinSpeechMs: deps.config.calleeMinSpeechMs,

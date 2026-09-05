@@ -33,8 +33,9 @@ export type TurnDetectionOptions = {
 
 /**
  * Phone-tuned server_vad. silence_duration_ms 160 (was 220) so the agent
- * starts speaking as soon as the callee stops. Leave at 160: going lower
- * risks chopping barge-in / end-of-turn. Override with GROK_VAD_SILENCE_MS.
+ * starts speaking as soon as the callee stops. Grok-audio path stays at 160:
+ * going lower risks chopping barge-in / end-of-turn. ElevenLabs playback uses
+ * `ELEVENLABS_VAD_SILENCE_MS` (default 130). Override Grok with GROK_VAD_SILENCE_MS.
  * prefix_padding_ms 200 keeps barge-in audio; idle_timeout_ms is hang-idle, not turn gap.
  * create_response is explicit: false until the scripted greeting has finished.
  */
