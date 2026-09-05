@@ -71,7 +71,7 @@ describe("HTTP API", () => {
     expect(res.body.tts).toEqual({
       default: "grok",
       grokVoice: "ara",
-      elevenlabs: { configured: false, model: "eleven_v3", voiceId: "" },
+      elevenlabs: { configured: false, audioPathActive: false, model: "eleven_v3", voiceId: "" },
     });
     expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
   });
@@ -383,7 +383,31 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(telnyx.dial).not.toHaveBeenCalled();
   });
 
-  it("accepts tts_provider=elevenlabs when configured but still dials with Grok voice ara", async () => {
+  it("GET /health reports ElevenLabs audio path active when the key is configured", async () => {
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezLnCDRKHkWiX",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app } = createApp({ config: withLabs, telnyx });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body.tts.elevenlabs).toEqual({
+      configured: true,
+      audioPathActive: true,
+      model: "eleven_v3",
+      voiceId: "NkpT2jezLnCDRKHkWiX",
+    });
+    expect(res.body.ready.elevenlabs).toBe(true);
+    expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
+  });
+
+  it("accepts tts_provider=elevenlabs when configured; Grok voice stays ara for STT", async () => {
     const withLabs = {
       ...config,
       elevenlabs: {

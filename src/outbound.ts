@@ -183,7 +183,7 @@ export async function placeOutboundCall(opts: {
   }
   if (parsed.value.ttsProvider === "elevenlabs") {
     console.info(
-      `[outbound] tts_provider=elevenlabs requested; audio pipeline still grok (voice ${opts.config.grokVoice}) until ElevenLabs TTS is wired`,
+      `[outbound] tts_provider=elevenlabs; Telnyx playback is ElevenLabs voice ${opts.config.elevenlabs.voiceId} (Grok STT/dialogue only)`,
     );
   }
 

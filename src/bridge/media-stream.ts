@@ -7,6 +7,7 @@ import type { CallStore } from "../calls/store.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 import { grokRealtimeUrl } from "../grok/session.js";
 import { MediaBridge, type JsonObject } from "./media-bridge.js";
+import { createElevenLabsTts } from "../elevenlabs.js";
 import type { CallRecord } from "../calls/types.js";
 
 export type MediaStreamDeps = {
@@ -15,6 +16,7 @@ export type MediaStreamDeps = {
   telnyx: TelnyxClient;
   onCallEnded: (call: CallRecord) => void;
   connectGrok?: (url: string, apiKey: string) => WebSocket;
+  fetchImpl?: typeof fetch;
 };
 
 export function attachMediaStream(server: HttpServer, deps: MediaStreamDeps): WebSocketServer {
@@ -68,6 +70,14 @@ async function handleMediaConnection(
     calleeMinSpeechMs: deps.config.calleeMinSpeechMs,
     hangupDelayMs: deps.config.hangupPlayoutBufferMs,
     onEnded: deps.onCallEnded,
+    ...(call.ttsProvider === "elevenlabs" && deps.config.elevenlabs.configured
+      ? {
+          elevenLabsTts: createElevenLabsTts(
+            deps.config.elevenlabs,
+            deps.fetchImpl ?? fetch,
+          ),
+        }
+      : {}),
   });
 
   const maxMs = deps.config.maxCallSeconds * 1000;

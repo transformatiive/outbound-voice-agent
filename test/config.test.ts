@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID } from "../src/tts.js";
+import { DEFAULT_ELEVENLABS_MODEL, DEFAULT_ELEVENLABS_VOICE_ID, elevenLabsAudioPathActive } from "../src/tts.js";
 
 describe("config", () => {
   it("defaults caller ID, Grok voice ara, Live 2 model, and Telnyx app/OVP ids", () => {
@@ -33,7 +33,8 @@ describe("config", () => {
       configured: false,
     });
     expect(cfg.ready.elevenlabs).toBe(false);
-    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("tnL8F53kfXcNNVSwbLzy");
+    expect(elevenLabsAudioPathActive(cfg.elevenlabs)).toBe(false);
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezLnCDRKHkWiX");
     expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
   });
 
@@ -94,7 +95,7 @@ describe("config", () => {
     expect(cfg.ready.outbound).toBe(false);
   });
 
-  it("marks ElevenLabs ready when ELEVENLABS_API_KEY is set (voice id defaults to IVC clone)", () => {
+  it("marks ElevenLabs ready when ELEVENLABS_API_KEY is set (voice id defaults to Benedita)", () => {
     const withKey = loadConfig({
       API_KEY: "k",
       TELNYX_API_KEY: "t",
@@ -104,6 +105,7 @@ describe("config", () => {
     });
     expect(withKey.elevenlabs.configured).toBe(true);
     expect(withKey.ready.elevenlabs).toBe(true);
+    expect(elevenLabsAudioPathActive(withKey.elevenlabs)).toBe(true);
     expect(withKey.elevenlabs.voiceId).toBe(DEFAULT_ELEVENLABS_VOICE_ID);
     expect(withKey.elevenlabs.model).toBe(DEFAULT_ELEVENLABS_MODEL);
     expect(withKey.grokVoice).toBe("ara");
