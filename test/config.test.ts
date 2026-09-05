@@ -25,7 +25,7 @@ describe("config", () => {
     expect(cfg.publicBaseUrl).toBe("https://example.up.railway.app");
     expect(cfg.turnDetection).toEqual({
       threshold: 0.5,
-      silenceDurationMs: 160,
+      silenceDurationMs: 130,
       prefixPaddingMs: 200,
       idleTimeoutMs: 12_000,
     });
@@ -155,7 +155,7 @@ describe("config", () => {
     expect(elLatency.elevenlabs.model).toBe("eleven_flash_v2_5");
     expect(elLatency.elevenlabs.optimizeStreamingLatency).toBe(4);
     expect(elLatency.elevenlabsVadSilenceMs).toBe(120);
-    expect(elLatency.turnDetection.silenceDurationMs).toBe(160);
+    expect(elLatency.turnDetection.silenceDurationMs).toBe(130);
     expect(elLatency.grokVoiceSpeed).toBe(1.05);
   });
 

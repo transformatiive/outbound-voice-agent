@@ -495,7 +495,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,
-      silence_duration_ms: 160,
+      silence_duration_ms: 130,
       prefix_padding_ms: 200,
       create_response: false,
       interrupt_response: true,
@@ -590,10 +590,12 @@ describe("media bridge Telnyx ↔ Grok", () => {
     await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "QUJDRA==" });
 
     expect(spy).not.toHaveBeenCalled();
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(responseCreateCount(grokSend)).toBe(0);
     expect(telnyxSend).not.toHaveBeenCalled();
-    expect(grokSend).toHaveBeenCalledWith({ type: "response.cancel" });
+    expect(grokSend.mock.calls.some((c) => (c[0] as { type?: string }).type === "response.cancel")).toBe(
+      false,
+    );
 
     grokSend.mockClear();
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
@@ -606,9 +608,11 @@ describe("media bridge Telnyx ↔ Grok", () => {
       item_id: "u1",
       transcript: "Estou",
     });
+    await flushMicrotasks();
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(forceMessageCount(grokSend)).toBe(0);
     expect(responseCreateCount(grokSend)).toBe(0);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "QUJDRA==" } });
     expect(bridge.call.transcript).toEqual([
       { role: "user", text: "Estou" },
       { role: "assistant", text: "Olá, fala a secretária." },
@@ -625,7 +629,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
     await bridge.onGrokEvent({ type: "session.updated" });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(responseCreateCount(grokSend)).toBe(0);
     expect(telnyxSend).not.toHaveBeenCalled();
   });
@@ -655,14 +659,16 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(bridge.call.transcript).toEqual([]);
 
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
 
     await bridge.onGrokEvent({
       type: "conversation.item.input_audio_transcription.completed",
       item_id: "u1",
       transcript: "Estou",
     });
+    await flushMicrotasks();
     expect(forceMessageCount(grokSend)).toBe(1);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "UlRQQQ==" } });
     const greetingUpdate = grokSend.mock.calls.filter((c) => c[0]?.type === "session.update").at(-1)?.[0];
     expect(greetingUpdate.session.turn_detection.create_response).toBe(false);
 
@@ -711,7 +717,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     clock.ms = 200;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(spy).not.toHaveBeenCalled();
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
     expect(logs.some((line) => /grace/i.test(line))).toBe(true);
     expect(logs.some((line) => /200ms since stream start/.test(line))).toBe(true);
@@ -726,7 +732,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
       transcript: "   ",
     });
     expect(spy).not.toHaveBeenCalled();
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(bridge.call.transcript).toEqual([]);
     spyLog.mockRestore();
   });
@@ -747,11 +753,11 @@ describe("media bridge Telnyx ↔ Grok", () => {
 
     clock.ms = 500;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
 
     clock.ms = 550;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
 
     clock.ms = 2000;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
@@ -785,7 +791,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
       item_id: "u1",
       transcript: "   ",
     });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(spy).not.toHaveBeenCalled();
 
     await bridge.onGrokEvent({
@@ -1088,7 +1094,7 @@ describe("media bridge ElevenLabs TTS playback", () => {
     expect(telnyxSend.mock.calls.some((c) => (c[0] as { event?: string }).event === "media")).toBe(
       false,
     );
-    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(1);
 
     clock.ms = 2122;
     await bridge.onGrokEvent({
@@ -1173,7 +1179,12 @@ describe("media bridge ElevenLabs TTS playback", () => {
     spyLog.mockRestore();
   });
 
-  it("primes Grok session on media start without speaking before waitForCallee unlock", async () => {
+  it("primes Grok greeting audio on session ready and only plays Telnyx media after waitForCallee unlock", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();
     const bridge = new MediaBridge({
@@ -1181,6 +1192,7 @@ describe("media bridge ElevenLabs TTS playback", () => {
       sendGrok: grokSend,
       sendTelnyx: telnyxSend,
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
     });
     bridge.onTelnyxMessage({ event: "start" });
     expect(grokSend.mock.calls.some((c) => (c[0] as { type?: string }).type === "session.update")).toBe(
@@ -1189,21 +1201,63 @@ describe("media bridge ElevenLabs TTS playback", () => {
     expect(forceMessageCount(grokSend)).toBe(0);
     expect(telnyxSend).not.toHaveBeenCalled();
 
+    clock.ms = 100;
     await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "greet-prefetch" });
     await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
-    expect(forceMessageCount(grokSend)).toBe(0);
+    await bridge.onGrokEvent({ type: "response.done", response_id: "greet-prefetch" });
+    expect(forceMessageCount(grokSend)).toBe(1);
     expect(telnyxSend.mock.calls.some((c) => (c[0] as { event?: string }).event === "media")).toBe(
       false,
     );
 
+    clock.ms = 2122;
     await bridge.onGrokEvent({
       type: "conversation.item.input_audio_transcription.completed",
       transcript: "Estou",
     });
+    await flushMicrotasks();
     expect(forceMessageCount(grokSend)).toBe(1);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "GROKAUDIO" } });
+    expect(logs.some((line) => /turn_latency.*provider=grok.*stage=unlock/.test(line))).toBe(true);
+    expect(logs.some((line) => /turn_latency.*cache=hit/.test(line))).toBe(true);
+    expect(logs.some((line) => /unlock_to_telnyx_ms=0/.test(line))).toBe(true);
+    spyLog.mockRestore();
+  });
+
+  it("logs speech_stopped through first Telnyx media for later Grok turns", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.speakGreeting();
     await bridge.onGrokEvent({ type: "response.created", response_id: "greeting" });
-    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GREET" });
-    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "GREET" } });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "R1JFVQ==" });
+    await bridge.onGrokEvent({ type: "response.done", response_id: "greeting" });
+    await flushMicrotasks();
+    telnyxSend.mockClear();
+
+    clock.ms = 5000;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_stopped" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    clock.ms = 5180;
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "UlRQQQ==" });
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "UlRQQQ==" } });
+    expect(logs.some((line) => /turn_latency.*provider=grok.*stage=speech_stopped/.test(line))).toBe(
+      true,
+    );
+    expect(logs.some((line) => /turn_latency.*stage=first_telnyx_media_frame/.test(line))).toBe(true);
+    spyLog.mockRestore();
   });
 
   it("prefetches the next ElevenLabs sentence while the current sentence is still playing", async () => {

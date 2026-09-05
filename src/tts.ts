@@ -7,7 +7,7 @@ export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
 export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezTenCDRKHkWiX";
 /** ElevenLabs stream URL `optimize_streaming_latency` (0–4). 4 is faster/lower quality. */
 export const DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY = 3;
-/** Tighter server_vad end-of-turn when Telnyx playback is ElevenLabs. Grok path stays at 160ms. */
+/** Shared server_vad end-of-turn silence for every TTS provider (Grok, ElevenLabs, later OpenAI). */
 export const DEFAULT_ELEVENLABS_VAD_SILENCE_MS = 130;
 
 export type ElevenLabsConfig = {

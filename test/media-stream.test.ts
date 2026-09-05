@@ -235,14 +235,14 @@ describe("media stream websocket", () => {
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "auto-1" }));
       grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "UlRQQQ==" }));
       await new Promise((r) => setTimeout(r, 80));
-      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(true);
       expect(grokFromApp.some((m) => m.type === "response.create")).toBe(false);
-      expect(grokFromApp.some((m) => m.type === "response.cancel")).toBe(true);
+      expect(grokFromApp.some((m) => m.type === "response.cancel")).toBe(false);
       expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
 
       grokWs.send(JSON.stringify({ type: "input_audio_buffer.speech_started" }));
       await new Promise((r) => setTimeout(r, 50));
-      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+      expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
 
       grokWs.send(
         JSON.stringify({
@@ -251,15 +251,17 @@ describe("media stream websocket", () => {
           transcript: "Estou",
         }),
       );
-      const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
+      const greeting = grokFromApp.find((m) => m.type === "conversation.item.create") as JsonObject;
       expect((greeting.item as JsonObject).type).toBe("force_message");
       expect(((greeting.item as JsonObject).content as JsonObject[])[0]).toMatchObject({
         type: "output_text",
         text: call.greeting,
       });
       expect(call.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária\. Confirmar quinta\.$/);
-      grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
-      grokWs.send(JSON.stringify({ type: "response.done" }));
+      const greetingMedia = await waitFor(telnyxFromGrok, (m) => m.event === "media");
+      expect(greetingMedia).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
+      expect(grokFromApp.filter((m) => m.type === "conversation.item.create")).toHaveLength(1);
+      grokWs.send(JSON.stringify({ type: "response.done", response_id: "auto-1" }));
       const talkingUpdate = await waitFor(
         grokFromApp,
         (m) =>
@@ -506,7 +508,7 @@ describe("media stream websocket", () => {
       grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "GROKAUDIO" }));
       await new Promise((r) => setTimeout(r, 80));
       expect(telnyxFromGrok.some((m) => m.event === "media")).toBe(false);
-      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(false);
+      expect(grokFromApp.some((m) => m.type === "conversation.item.create")).toBe(true);
 
       grokWs.send(
         JSON.stringify({
@@ -515,13 +517,14 @@ describe("media stream websocket", () => {
           transcript: "Estou",
         }),
       );
-      const greeting = await waitFor(grokFromApp, (m) => m.type === "conversation.item.create");
+      const greeting = grokFromApp.find((m) => m.type === "conversation.item.create") as JsonObject;
       expect((greeting.item as JsonObject).type).toBe("force_message");
       const greetingMedia = await waitFor(telnyxFromGrok, (m) => m.event === "media");
       expect(greetingMedia).toEqual({
         event: "media",
         media: { payload: elPcmu.toString("base64") },
       });
+      expect(grokFromApp.filter((m) => m.type === "conversation.item.create")).toHaveLength(1);
       expect(elCalls.filter((c) => c.body.includes(call.greeting))).toHaveLength(prefetchCount);
 
       telnyxWs.close();

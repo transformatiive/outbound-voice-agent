@@ -114,6 +114,9 @@ export class MediaBridge {
   private elPendingTail = "";
   private elTailPrefetch: { text: string; responseId: string; buffer: PcmuFrameBuffer } | undefined;
   private readonly greetingAudioCache: GreetingAudioCache;
+  private greetingForceSent = false;
+  private grokGreetingComplete = false;
+  private readonly grokGreetingBuffer = new PcmuFrameBuffer();
   private lastSpeechStoppedAtMs: number | undefined;
   private elTrace: ElLatencyTrace | undefined;
   private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
@@ -153,6 +156,28 @@ export class MediaBridge {
     if (!this.grokConfigured) this.configureGrokSession();
   }
 
+  private queueScriptedGreeting(): void {
+    if (this.greetingForceSent) return;
+    this.greetingForceSent = true;
+    this.sendGrok({
+      type: "conversation.item.create",
+      item: {
+        type: "force_message",
+        role: "assistant",
+        interruptible: false,
+        content: [{ type: "output_text", text: this.call.greeting }],
+      },
+    });
+  }
+
+  private async playGrokCachedGreeting(): Promise<void> {
+    this.elGeneration += 1;
+    this.elAbort?.abort();
+    this.elAbort = undefined;
+    const cacheStatus = this.grokGreetingBuffer.frames.length > 0 ? "hit" : "prefetch";
+    await this.drainPcmuBuffer(this.grokGreetingBuffer, { isGreeting: true, cacheStatus });
+  }
+
   configureGrokSession(): void {
     const waitForCallee = this.isWaitingForCalleeSpeech();
     const autoRespond = this.greetingSent && !this.greetingPlaying;
@@ -186,19 +211,19 @@ export class MediaBridge {
     this.greetingPlaying = true;
     if (wasWaiting) this.suppressUntilNextCalleeSpeech = true;
     this.suppressAssistantAudio = false;
-    this.greetingGrokDone = false;
+    this.greetingGrokDone = this.grokGreetingComplete;
     const elClientReady =
       this.wantsElevenLabsPlayback() &&
       (this.elevenLabsTts !== undefined || this.greetingAudioCache.get(this.call.id) !== undefined);
     this.greetingElDone = !elClientReady;
+    const prev = this.elTrace;
+    this.beginElTrace("greeting", {
+      unlockAtMs,
+      ...(prev?.httpStartAtMs !== undefined ? { httpStartAtMs: prev.httpStartAtMs } : {}),
+      ...(prev?.firstByteAtMs !== undefined ? { firstByteAtMs: prev.firstByteAtMs } : {}),
+    });
     if (this.wantsElevenLabsPlayback()) {
       if (elClientReady) {
-        const prev = this.elTrace;
-        this.beginElTrace("greeting", {
-          unlockAtMs,
-          ...(prev?.httpStartAtMs !== undefined ? { httpStartAtMs: prev.httpStartAtMs } : {}),
-          ...(prev?.firstByteAtMs !== undefined ? { firstByteAtMs: prev.firstByteAtMs } : {}),
-        });
         const cached = this.greetingAudioCache.get(this.call.id);
         this.logElStage("unlock", {
           ms_since_stream: msSinceStreamStart(this.calleeGate, unlockAtMs),
@@ -210,19 +235,17 @@ export class MediaBridge {
           `[bridge ${this.call.id}] tts_provider=elevenlabs but TTS client missing; not falling back to Grok ara`,
         );
       }
+    } else {
+      this.logElStage("unlock", {
+        ms_since_stream: msSinceStreamStart(this.calleeGate, unlockAtMs),
+        cache_frames: this.grokGreetingBuffer.frames.length,
+      });
+      void this.playGrokCachedGreeting();
     }
-    if (wasWaiting) this.cancelPendingGrokResponse();
+    if (wasWaiting && !this.greetingForceSent) this.cancelPendingGrokResponse();
     if (wasWaiting) this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
-    this.sendGrok({
-      type: "conversation.item.create",
-      item: {
-        type: "force_message",
-        role: "assistant",
-        interruptible: false,
-        content: [{ type: "output_text", text: this.call.greeting }],
-      },
-    });
+    this.queueScriptedGreeting();
     // Keep create_response false while the scripted greeting plays so the model
     // cannot immediately re-introduce itself. Instructions switch to "already delivered".
     this.configureGrokSession();
@@ -264,6 +287,7 @@ export class MediaBridge {
         if (!this.grokConfigured) this.configureGrokSession();
         return;
       case "session.updated":
+        this.queueScriptedGreeting();
         if (this.call.waitForCallee !== true) this.speakGreeting();
         return;
       case "response.created":
@@ -273,7 +297,9 @@ export class MediaBridge {
         this.onGrokResponseDone(event);
         return;
       case "input_audio_buffer.timeout_triggered":
-        if (this.isWaitingForCalleeSpeech()) this.cancelPendingGrokResponse(true);
+        if (this.isWaitingForCalleeSpeech() && !this.greetingForceSent) {
+          this.cancelPendingGrokResponse(true);
+        }
         return;
       case "response.output_audio.delta":
       case "response.audio.delta": {
@@ -305,7 +331,7 @@ export class MediaBridge {
         if (waiting) {
           this.logCalleeGate(decision, "speech_stopped");
           if (decision.unlock) this.speakGreeting();
-        } else if (this.wantsElevenLabsPlayback() && this.greetingSent) {
+        } else if (this.greetingSent) {
           this.lastSpeechStoppedAtMs = this.clockMs();
           this.beginElTrace("turn", { speechStoppedAtMs: this.lastSpeechStoppedAtMs });
           this.logElStage("speech_stopped");
@@ -414,6 +440,11 @@ export class MediaBridge {
   private onGrokResponseCreated(event: JsonObject): void {
     const responseId = responseIdFromEvent(event);
     if (!this.greetingSent) {
+      if (this.greetingForceSent && (!this.greetingResponseId || responseId === this.greetingResponseId || !responseId)) {
+        if (responseId) this.greetingResponseId = responseId;
+        this.grokResponsePending = true;
+        return;
+      }
       this.cancelPendingGrokResponse(true);
       return;
     }
@@ -440,6 +471,14 @@ export class MediaBridge {
   }
 
   private onGrokResponseDone(event: JsonObject): void {
+    const responseId = responseIdFromEvent(event);
+    const greetingResponse =
+      (this.greetingResponseId && responseId === this.greetingResponseId) ||
+      (this.greetingForceSent && !this.grokGreetingComplete && (!responseId || !this.greetingResponseId));
+    if (greetingResponse) {
+      this.grokGreetingComplete = true;
+      if (!this.wantsElevenLabsPlayback()) this.grokGreetingBuffer.finish(false);
+    }
     this.grokResponsePending = false;
     if (this.wantsElevenLabsPlayback()) {
       if (!this.elevenLabsTts) {
@@ -477,6 +516,8 @@ export class MediaBridge {
       this.greetingPlaying = false;
       this.greetingElDone = true;
       this.greetingGrokDone = true;
+      this.grokGreetingComplete = true;
+      this.grokGreetingBuffer.finish(false);
       this.configureGrokSession();
     }
   }
@@ -490,15 +531,21 @@ export class MediaBridge {
 
   private forwardGrokAudio(event: JsonObject): void {
     if (this.wantsElevenLabsPlayback()) return;
-    if (this.isWaitingForCalleeSpeech()) return;
-    if (!this.greetingSent) return;
-    if (this.suppressAssistantAudio) return;
     const delta =
       typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
-    if (typeof delta === "string" && delta.length > 0) {
-      this.noteTurnAudio(delta);
-      this.sendTelnyx({ event: "media", media: { payload: delta } });
+    if (typeof delta !== "string" || delta.length === 0) return;
+    if (!this.greetingSent) {
+      if (this.greetingForceSent) this.grokGreetingBuffer.push(delta);
+      return;
     }
+    if (this.greetingPlaying && !this.grokGreetingBuffer.done) {
+      this.grokGreetingBuffer.push(delta);
+      return;
+    }
+    if (this.suppressAssistantAudio) return;
+    this.noteTurnAudio(delta);
+    this.sendTelnyx({ event: "media", media: { payload: delta } });
+    this.noteFirstTelnyxMedia("live");
   }
 
   private beginTurnAudio(): void {
@@ -924,12 +971,17 @@ export class MediaBridge {
   }
 
   private logElStage(stage: string, extra: Record<string, number | string | undefined> = {}): void {
-    const parts = [`stage=${stage}`, `turn=${this.elTrace?.kind ?? "turn"}`];
+    const provider = this.wantsElevenLabsPlayback() ? "elevenlabs" : "grok";
+    const parts = [`provider=${provider}`, `stage=${stage}`, `turn=${this.elTrace?.kind ?? "turn"}`];
     for (const [key, value] of Object.entries(extra)) {
       if (value === undefined || value === "") continue;
       parts.push(`${key}=${value}`);
     }
-    console.info(`[bridge ${this.call.id}] el_latency ${parts.join(" ")}`);
+    const line = parts.join(" ");
+    console.info(`[bridge ${this.call.id}] turn_latency ${line}`);
+    if (this.wantsElevenLabsPlayback()) {
+      console.info(`[bridge ${this.call.id}] el_latency ${line}`);
+    }
   }
 
   private flushResponseDoneWaiters(): void {
