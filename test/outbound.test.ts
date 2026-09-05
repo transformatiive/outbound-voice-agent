@@ -79,7 +79,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(pt.ok).toBe(true);
     if (!pt.ok) return;
-    expect(pt.value.greeting).toBe("Olá, boa tarde. Confirmar a marcação.");
+    expect(pt.value.greeting).toBe("Olá, boa tarde. Ligo da secretária. Confirmar a marcação.");
     expect(pt.value.timezone).toBe("Europe/Lisbon");
 
     const gb = parseOutboundBody(
@@ -92,7 +92,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(gb.ok).toBe(true);
     if (!gb.ok) return;
-    expect(gb.value.greeting).toBe("Hello, good morning. Confirm the booking.");
+    expect(gb.value.greeting).toBe("Hello, good morning. I'm calling from the secretary. Confirm the booking.");
 
     const us = parseOutboundBody(
       {
@@ -104,7 +104,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(us.ok).toBe(true);
     if (!us.ok) return;
-    expect(us.value.greeting).toBe("Hello, good morning. Confirm the booking.");
+    expect(us.value.greeting).toBe("Hello, good morning. I'm calling from the secretary. Confirm the booking.");
   });
 
   it("wraps a caller-supplied persona greeting with time-of-day and purpose", () => {
@@ -129,7 +129,7 @@ describe("parseOutboundBody greeting", () => {
     expect(explicit.ok).toBe(true);
     if (!explicit.ok) return;
     expect(explicit.value.waitForCallee).toBe(true);
-    expect(explicit.value.greeting).toBe("Olá, boa tarde. Confirmar a marcação.");
+    expect(explicit.value.greeting).toBe("Olá, boa tarde. Ligo da secretária. Confirmar a marcação.");
 
     const inferred = parseOutboundBody(
       {
@@ -143,7 +143,7 @@ describe("parseOutboundBody greeting", () => {
     expect(inferred.ok).toBe(true);
     if (!inferred.ok) return;
     expect(inferred.value.waitForCallee).toBe(true);
-    expect(inferred.value.greeting).toBe("Olá, boa tarde. Confirmar a marcação.");
+    expect(inferred.value.greeting).toBe("Olá, boa tarde. Ligo da secretária. Confirmar a marcação.");
   });
 
   it("does not put ROLEPLAY objectives into the spoken greeting and honors spokenAsk", () => {
@@ -204,5 +204,71 @@ Confirmar a consulta de otorrino na segunda às 10h.
     expect(bad.ok).toBe(false);
     if (bad.ok) return;
     expect(bad.error).toMatchObject({ status: 400, error: "invalid_timezone" });
+  });
+});
+
+describe("parseOutboundBody persona, roles, tts_provider", () => {
+  it("defaults tts_provider grok, bot_role caller_booking, callee_role venue_staff", () => {
+    const parsed = parseOutboundBody(base, { now: LISBON_AFTERNOON });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.ttsProvider).toBe("grok");
+    expect(parsed.value.botRole).toBe("caller_booking");
+    expect(parsed.value.calleeRole).toBe("venue_staff");
+    expect(parsed.value.persona).toBeUndefined();
+  });
+
+  it("uses persona for spoken identity composed with the objective", () => {
+    const parsed = parseOutboundBody(
+      {
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: "secretária da empresa",
+        objective: "Reservar uma mesa para duas pessoas.",
+        waitForCallee: true,
+      },
+      { now: LISBON_AFTERNOON },
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.persona).toBe("secretária da empresa");
+    expect(parsed.value.greeting).toBe(
+      "Olá, boa tarde. Fala a secretária da empresa. Reservar uma mesa para duas pessoas.",
+    );
+    expect(parsed.value.greeting).not.toMatch(/bem-vindo/i);
+  });
+
+  it("accepts tts_provider grok | elevenlabs and rejects other values", () => {
+    const grok = parseOutboundBody({ ...base, tts_provider: "grok" });
+    expect(grok.ok).toBe(true);
+    if (!grok.ok) return;
+    expect(grok.value.ttsProvider).toBe("grok");
+
+    const labs = parseOutboundBody({ ...base, tts_provider: "elevenlabs" });
+    expect(labs.ok).toBe(true);
+    if (!labs.ok) return;
+    expect(labs.value.ttsProvider).toBe("elevenlabs");
+
+    const bad = parseOutboundBody({ ...base, tts_provider: "amazon" });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toMatchObject({ status: 400, error: "invalid_tts_provider" });
+  });
+
+  it("accepts bot_role and callee_role labels", () => {
+    const parsed = parseOutboundBody({
+      ...base,
+      bot_role: "caller_booking",
+      callee_role: "venue_staff",
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.botRole).toBe("caller_booking");
+    expect(parsed.value.calleeRole).toBe("venue_staff");
+
+    const bad = parseOutboundBody({ ...base, bot_role: 1 });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toMatchObject({ status: 400, error: "invalid_bot_role" });
   });
 });

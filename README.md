@@ -4,9 +4,9 @@ Outbound-only **Grok Voice Live 2** agent over **Telnyx Call Control** (Alfasegu
 
 Places PSTN calls from **+351210210260**, bridges bidirectional audio to xAI Grok Voice (`ara`), speaks a greeting, pursues an objective, hangs up. Languages: **`pt-PT` | `en-GB` | `en-US`** (default `pt-PT`). Not Alice.
 
-Persona and objective always come from `POST /api/outbound` (`greeting`, `objective`, optional `instructions`). The agent speaks as a person on the phone — never a product name, never a recording notice.
+Persona (`persona` preferred, or `greeting`) and objective always come from `POST /api/outbound`. The agent is the **caller who books** — never the restaurant. It speaks as a person on the phone — never a product name, never a recording notice, never «bem-vindo ao restaurante».
 
-Set `waitForCallee: true` on `POST /api/outbound` to stay silent until the callee speaks (e.g. «Estou»), then deliver the composed greeting (Olá + time-of-day + brief persona + a short natural ask — never a ROLEPLAY dump), then pursue the objective. Callers may pass `greeting` / `spokenAsk` or omit them — the service composes from persona + sanitized purpose + local time (`Europe/Lisbon` by default). Default remains immediate greeting (no wait).
+Set `waitForCallee: true` on `POST /api/outbound` to stay silent until the callee speaks (e.g. «Estou» / «estou?»), then deliver the composed greeting (Olá + time-of-day + caller identity + a short natural ask — never a ROLEPLAY dump), then pursue the objective. Callers may pass `persona` / `greeting` / `spokenAsk` or omit them — the service composes from persona + sanitized purpose + local time (`Europe/Lisbon` by default). Default remains immediate greeting (no wait).
 
 Tests never place real phone calls.
 
@@ -26,7 +26,7 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 1. `POST /api/outbound` → Telnyx `POST /v2/calls` with bidirectional media streaming.
 2. Telnyx connects to `wss://…/media-stream`.
 3. This app opens `wss://api.x.ai/v1/realtime` (Grok Voice Live 2, voice `ara`).
-4. Greeting is spoken verbatim exactly once (`force_message`): «Olá» + Lisbon time-of-day + brief persona + a **short natural ask**. The spoken line never includes raw `objective` dumps, `ROLEPLAY` blocks, markdown, or system instructions (`composeSpokenGreeting` sanitizes). Optional `spokenAsk` supplies a clean ask when the objective is a prompt. Session instructions require a human phone voice (`ara`): warmth, intonation, «certo»/«perfeito», short sentences, never reading numbered lists. With `waitForCallee: true`, the bridge stays mute until **real callee words** (short greetings like «Estou»/«alô»/«sim», any non-empty transcript, or speech after a ~500ms grace window lasting at least `GROK_CALLEE_MIN_SPEECH_MS`, default **130ms**). Early `speech_started` from ringback/noise is ignored. Then the greeting is delivered once; `create_response` stays off until that greeting finishes so the model cannot immediately re-introduce itself.
+4. Greeting is spoken verbatim exactly once (`force_message`): «Olá» + Lisbon time-of-day + caller identity + a **short natural ask**. The spoken line never includes raw `objective` dumps, `ROLEPLAY` blocks, markdown, system instructions, or venue-welcome lines (`composeSpokenGreeting` sanitizes). Optional `spokenAsk` supplies a clean ask when the objective is a prompt. Session instructions require a human phone voice (`ara`): warmth, intonation, «certo»/«perfeito», short sentences, never reading numbered lists. The bot is who **dialled** and requests the booking; the interlocutor is venue staff who answered. With `waitForCallee: true`, the bridge stays mute until **real callee words** (short greetings like «Estou»/«estou?»/«alô»/«sim», any non-empty transcript, or speech after a ~500ms grace window lasting at least `GROK_CALLEE_MIN_SPEECH_MS`, default **80ms**). Early `speech_started` from ringback/noise is ignored. Then the greeting is delivered once; `create_response` stays off until that greeting finishes so the model cannot immediately re-introduce itself.
 5. The model calls `end_call`. The bridge waits for that turn’s `response.done` plus remaining PCMU playout and `GROK_HANGUP_PLAYOUT_MS` (default 1000ms) so the farewell/summary is not cut mid-sentence, then Telnyx hangup.
 6. Optional `RESULT_WEBHOOK` receives the transcript and outcome.
 
@@ -42,15 +42,19 @@ Secrets (`TELNYX_API_KEY`, `XAI_API_KEY`, `API_KEY`) are set on Railway after me
 
 ### `POST /api/outbound`
 
-`language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected.
+`language` is optional: `pt-PT` | `en-GB` | `en-US` (default `pt-PT`). Invalid values are rejected. `pt-PT` is European Portuguese only — never Brazilian (`pt-BR`), including vocabulary and greeting patterns («Oi», «Tudo bem?», «bem-vindo ao restaurante»).
 
-`greeting` is the optional spoken persona line. Pass it on every dial that should introduce a secretary or other identity. If omitted, the service composes `Olá`/`Hello` + a time-of-day greeting in `timezone` (default `Europe/Lisbon`) + a short natural ask derived from `objective`. If `greeting` is provided, time-of-day is prepended when missing, and a sanitized ask is appended when the persona line does not already state the purpose. Raw `ROLEPLAY` / prompt dumps in `objective` are **never** copied into `force_message`. Optional `spokenAsk` is a clean one-line ask used when `objective` is a script. `waitForCallee` no longer requires `greeting` — compose from persona + local time + sanitized ask instead.
+`tts_provider` is optional: `grok` | `elevenlabs` (default `grok`). Grok voice stays **`ara`**. `elevenlabs` is dual-ready: Developer sets `ELEVENLABS_API_KEY` on Railway (secret, never in git). Voice id defaults to the IVC clone `tnL8F53kfXcNNVSwbLzy`; model defaults to `eleven_v3` (not the vault’s `multilingual_v2`). If the API key is unset, `tts_provider=elevenlabs` returns **503 `elevenlabs_not_configured`**. When the key is present, `ready.elevenlabs` is true and the call is accepted; audio still goes through Grok until the ElevenLabs pipeline is wired.
+
+`bot_role` (default `caller_booking`) and `callee_role` (default `venue_staff`) are optional labels. The bot **always** placed the call and requests the booking. The callee answered (venue staff / reception). The bot never welcomes as the restaurant and never offers tables as the house.
+
+`persona` is the optional spoken identity (preferred over `greeting` when both are sent). Compose: Olá/Hello + time-of-day + persona + sanitized ask from `objective`. `greeting` remains supported as the identity line when `persona` is omitted. If both identity fields are omitted, the service inserts a caller identity («Ligo da secretária.» / “I'm calling from the secretary.”). Raw `ROLEPLAY` / prompt dumps in `objective` are **never** copied into `force_message`. Optional `spokenAsk` is a clean one-line ask used when `objective` is a script. `waitForCallee` no longer requires `greeting`.
 
 Optional `timezone` is an IANA name (default `Europe/Lisbon`). Invalid values are 400 `invalid_timezone`.
 
 Time-of-day (`pt-PT`): `Bom dia` before 12:00, `Boa tarde` from 12:00 until 20:00, `Boa noite` from 20:00. English: Good morning before 12:00, Good afternoon until 17:00, Good evening after that.
 
-`waitForCallee` is optional (default `false`). When `true`, the bridge does not speak on `session.updated`, stream start, or Grok session create. Grok `turn_detection.create_response` is `false` (so the model cannot auto-greet), outbound audio is dropped, and any premature `response.created` is cancelled. The greeting is spoken once via `force_message` after **real callee speech**: a short greeting transcript («estou», «alô», «sim», «ok», «hello», including garbled «Two»), any other non-empty user transcription, or `speech_started`+`speech_stopped` after a ~500ms grace window (`GROK_CALLEE_SPEECH_GRACE_MS`) with duration ≥ `GROK_CALLEE_MIN_SPEECH_MS` (default **130ms**), even with empty ASR. A word-length utterance that finishes *during* grace is remembered and unlocks as soon as grace ends (next media frame or VAD event) so «estou» does not wait on ASR. `create_response` stays off until that greeting's `response.done`, and any model turn before the callee speaks again is cancelled so the greeting is not repeated. Ringback/`speech_started` in the grace window does not unlock mute immediately; a word-length utterance that *ends after* grace can unlock. Unlock logs include the reason and ms since stream start. The unlocking user line is recorded before the greeting in the transcript when transcription is what unlocks. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request. Prompt text alone is not what keeps the line silent. Session instructions treat the agent as the caller making/confirming a booking: never invent or deny reservation state the interlocutor already stated (e.g. «já estava marcado»).
+`waitForCallee` is optional (default `false`). When `true`, the bridge does not speak on `session.updated`, stream start, or Grok session create. Grok `turn_detection.create_response` is `false` (so the model cannot auto-greet), outbound audio is dropped, and any premature `response.created` is cancelled. The greeting is spoken once via `force_message` after **real callee speech**: a short greeting transcript («estou», «estou?», «alô», «sim», «ok», «hello», including garbled «Two»), any other non-empty user transcription, or `speech_started`+`speech_stopped` after a ~500ms grace window (`GROK_CALLEE_SPEECH_GRACE_MS`) with duration ≥ `GROK_CALLEE_MIN_SPEECH_MS` (default **80ms**), even with empty ASR. A word-length utterance that finishes *during* grace is remembered and unlocks as soon as grace ends (next media frame or VAD event) so «estou» / «estou?» does not wait on ASR. `create_response` stays off until that greeting's `response.done`, and any model turn before the callee speaks again is cancelled so the greeting is not repeated. Ringback/`speech_started` in the grace window does not unlock mute immediately; a word-length utterance that *ends after* grace can unlock. Unlock logs include the reason, ms since stream start, and a transcript snippet. The unlocking user line is recorded before the greeting in the transcript when transcription is what unlocks. Extra `instructions` that ask to wait until the callee speaks also enable this unless `waitForCallee` is explicitly `false`. Prefer `waitForCallee: true` on the request. Prompt text alone is not what keeps the line silent. Session instructions treat the agent as the caller making/confirming a booking: never invent or deny reservation state the interlocutor already stated (e.g. «já estava marcado»); never greet as the restaurant.
 
 - `pt-PT` — European Portuguese (never Brazilian). Spoken opening: `Olá, bom dia/boa tarde/boa noite.` plus persona and purpose.
 - `en-GB` — natural British English. Spoken opening: `Hello, good morning/afternoon/evening.` plus persona and purpose.
@@ -60,18 +64,24 @@ Time-of-day (`pt-PT`): `Bom dia` before 12:00, `Boa tarde` from 12:00 until 20:0
 {
   "to": "+351912345678",
   "language": "pt-PT",
+  "persona": "secretária da Alfaseguros",
   "greeting": "Olá, fala a secretária da Alfaseguros.",
   "objective": "Confirmar a marcação de quinta-feira às 16h.",
   "spokenAsk": "Confirmar a marcação de quinta-feira às 16h.",
   "timezone": "Europe/Lisbon",
   "instructions": "optional extra prompt rules",
   "waitForCallee": true,
+  "tts_provider": "grok",
+  "bot_role": "caller_booking",
+  "callee_role": "venue_staff",
   "metadata": { "ticketId": "abc" },
   "maxDurationSeconds": 300
 }
 ```
 
 Example spoken `force_message` from that body at 13:00 Lisbon: `Olá, boa tarde. Fala a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.`
+
+TRNSF can omit `greeting` and send only `persona` + `objective` + `waitForCallee: true`. Roles default to caller booking vs venue staff even when omitted.
 
 ## Telnyx dial
 

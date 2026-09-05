@@ -1,6 +1,6 @@
 export const DEFAULT_CALLEE_SPEECH_GRACE_MS = 500;
-/** Word-length floor after grace. «Estou» is often ~120–180ms; 250ms was too strict. */
-export const DEFAULT_CALLEE_MIN_SPEECH_MS = 130;
+/** Word-length floor after grace. «Estou» / «estou?» is often ~80–180ms; 130ms still missed first turns. */
+export const DEFAULT_CALLEE_MIN_SPEECH_MS = 80;
 
 export type CalleeSpeechGateConfig = {
   graceMs: number;
@@ -32,8 +32,8 @@ export type CalleeSpeechDecision =
   | { unlock: false; reason: CalleeSpeechBlockReason }
   | { unlock: true; reason: CalleeSpeechUnlockReason };
 
-const SHORT_GREETING =
-  /^(estou|esto|alo|alô|sim|ok|okay|hello|hi|hey|yes|yeah|yep|pois|diga|pronto|ola|olá|wai|two|tu)$/i;
+const SHORT_GREETING_TOKEN =
+  /^(estou|esto|estau|alo|sim|ok|okay|hello|hi|hey|yes|yeah|yep|pois|diga|pronto|ola|wai|two|tu)$/i;
 
 export function createCalleeSpeechGate(): CalleeSpeechGate {
   return {
@@ -64,15 +64,50 @@ export function isNonEmptyCalleeTranscript(text: string): boolean {
   return text.trim().length > 0;
 }
 
-export function isShortCalleeGreeting(text: string): boolean {
-  const t = stripDiacritics(text)
+export function normalizeCalleeTranscript(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
+    .replace(/[?!.…¿¡,;:«»""''`´]+/gu, " ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+export function isShortCalleeGreeting(text: string): boolean {
+  const t = normalizeCalleeTranscript(text);
   if (!t) return false;
-  if (SHORT_GREETING.test(t)) return true;
-  const tokens = t.split(/\s+/).filter(Boolean);
-  return tokens.length <= 2 && tokens.every((tok) => SHORT_GREETING.test(tok));
+  if (SHORT_GREETING_TOKEN.test(t)) return true;
+  const tokens = t.split(" ").filter(Boolean);
+  if (tokens.length === 0) return false;
+  const first = tokens[0] ?? "";
+  if (
+    tokens.length <= 3 &&
+    /^(estou|esto|estau|alo|ola|sim|ok|okay)$/i.test(first)
+  ) {
+    return true;
+  }
+  return tokens.length <= 2 && tokens.every((tok) => SHORT_GREETING_TOKEN.test(tok));
+}
+
+export function calleeTranscriptFromEvent(event: Record<string, unknown>): string {
+  const direct = transcriptFromUnknown(event.transcript);
+  if (direct) return direct;
+  if (typeof event.text === "string" && event.text.trim()) return event.text;
+  const item = event.item;
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const content = (item as { content?: unknown }).content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        const fromPart = transcriptFromUnknown(part);
+        if (fromPart) return fromPart;
+      }
+    }
+    const fromItem = transcriptFromUnknown(item);
+    if (fromItem) return fromItem;
+  }
+  return "";
 }
 
 export function onSpeechStarted(
@@ -146,6 +181,15 @@ export function onPostGraceCheck(
   return { unlock: true, reason: "grace_elapsed" };
 }
 
+function transcriptFromUnknown(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (!value || typeof value !== "object") return "";
+  const record = value as { transcript?: unknown; text?: unknown };
+  if (typeof record.transcript === "string" && record.transcript.trim()) return record.transcript;
+  if (typeof record.text === "string" && record.text.trim()) return record.text;
+  return "";
+}
+
 function utteranceDurationMs(
   atMs: number,
   acceptedAt: number | undefined,
@@ -161,8 +205,4 @@ function utteranceDurationMs(
 function inGrace(gate: CalleeSpeechGate, atMs: number, graceMs: number): boolean {
   if (gate.streamStartedAtMs === undefined) return true;
   return atMs - gate.streamStartedAtMs < graceMs;
-}
-
-function stripDiacritics(value: string): string {
-  return value.normalize("NFD").replace(/\p{M}/gu, "");
 }

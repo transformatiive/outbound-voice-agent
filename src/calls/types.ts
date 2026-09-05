@@ -1,4 +1,6 @@
 import type { Language } from "../prompt.js";
+import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
+import { DEFAULT_TTS_PROVIDER, type TtsProvider } from "../tts.js";
 
 export type CallStatus =
   | "dialing"
@@ -26,6 +28,10 @@ export type CallRecord = {
   waitForCallee?: boolean;
   timezone?: string;
   extraInstructions?: string;
+  persona?: string;
+  botRole?: string;
+  calleeRole?: string;
+  ttsProvider?: TtsProvider;
   metadata?: Record<string, unknown>;
   voice: string;
   model: string;
@@ -52,6 +58,10 @@ export type PublicCall = {
   greeting: string;
   objective: string;
   waitForCallee: boolean;
+  persona?: string;
+  botRole: string;
+  calleeRole: string;
+  ttsProvider: TtsProvider;
   voice: string;
   model: string;
   telnyx: {
@@ -77,6 +87,9 @@ export function toPublicCall(call: CallRecord): PublicCall {
     greeting: call.greeting,
     objective: call.objective,
     waitForCallee: call.waitForCallee === true,
+    botRole: call.botRole ?? DEFAULT_BOT_ROLE,
+    calleeRole: call.calleeRole ?? DEFAULT_CALLEE_ROLE,
+    ttsProvider: call.ttsProvider ?? DEFAULT_TTS_PROVIDER,
     voice: call.voice,
     model: call.model,
     telnyx: { ...call.telnyx },
@@ -86,5 +99,6 @@ export function toPublicCall(call: CallRecord): PublicCall {
     ...(call.answeredAt !== undefined ? { answeredAt: call.answeredAt } : {}),
     ...(call.endedAt !== undefined ? { endedAt: call.endedAt } : {}),
     ...(call.error !== undefined ? { error: call.error } : {}),
+    ...(call.persona !== undefined ? { persona: call.persona } : {}),
   };
 }

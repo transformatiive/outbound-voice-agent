@@ -11,7 +11,10 @@ const LEADING_TIME =
 
 /** Opening verbs that are already a natural spoken ask — do not wrap with «ligo sobre». */
 const SPOKEN_ASK_VERB =
-  /^(confirmar|confirma|pedir|peça|marcar|agendar|ligar|ligo|quero|gostaria|preciso|confirm|please|i\b|we\b|calling|call|ask)\b/i;
+  /^(confirmar|confirma|pedir|peça|marcar|agendar|ligar|ligo|queria|quero|gostaria|preciso|reservar|chamo|confirm|please|i\b|we\b|calling|call|ask)\b/i;
+
+const IDENTITY_ALREADY_SPOKEN =
+  /^(olá|ola|hello|fala|falo|ligo|sou|this is|i'm calling|i am calling|im calling|calling)(?:\b|[\s,.!?]|$)/i;
 
 const SCRIPT_LINE_LABEL =
   /^(roleplay|role\b|objetivo|objective|instructions?|system\b|prompt\b|persona\b|regras?\b|rules?\b|contexto\b|context\b|cenario|cenário|scenario)\s*[:\-–]/i;
@@ -52,13 +55,43 @@ export function timeOfDayGreeting(
   }
 }
 
+export function defaultCallerIdentity(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return "Ligo da secretária.";
+    case "en-GB":
+    case "en-US":
+      return "I'm calling from the secretary.";
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+export function looksLikeVenueWelcome(text: string): boolean {
+  const t = stripDiacritics(text).toLowerCase();
+  return (
+    /\bbem[- ]vind/.test(t) ||
+    /\bseja bem/.test(t) ||
+    /\bem que posso ajudar/.test(t) ||
+    /\bwelcome to (the )?(restaurant|venue)/.test(t) ||
+    /\bhow can i help you\b/.test(t) ||
+    /\bmesa para quantas/.test(t) ||
+    /\btemos (uma )?mesa/.test(t) ||
+    /\bpois nao\s*[.!?]*$/.test(t)
+  );
+}
+
 /**
- * Spoken force_message text only: Olá/Hello + time-of-day + brief persona + a short
+ * Spoken force_message text only: Olá/Hello + time-of-day + caller identity + a short
  * natural ask. Never dumps ROLEPLAY, system instructions, markdown, or the raw objective.
+ * Never greets as the restaurant («bem-vindo ao restaurante»).
  */
 export function composeSpokenGreeting(input: {
   language: Language;
   greeting?: string;
+  persona?: string;
   objective: string;
   spokenAsk?: string;
   timezone?: string;
@@ -69,7 +102,7 @@ export function composeSpokenGreeting(input: {
   const timeGreeting = timeOfDayGreeting(input.language, timezone, now);
   const hello = helloWord(input.language);
   const opening = `${hello}, ${lowerFirst(timeGreeting)}.`;
-  const persona = sanitizePersona(input.greeting ?? "");
+  const persona = spokenIdentity(input.language, input.persona ?? input.greeting ?? "");
   const ask = spokenAskFromObjective({
     language: input.language,
     objective: input.objective,
@@ -96,6 +129,25 @@ export function composeSpokenGreeting(input: {
     spoken = joinUtterances(spoken, ask);
   }
   return assertNaturalSpeech(spoken);
+}
+
+function spokenIdentity(language: Language, raw: string): string {
+  const cleaned = sanitizePersona(raw);
+  if (!cleaned || looksLikeVenueWelcome(cleaned)) return defaultCallerIdentity(language);
+  if (IDENTITY_ALREADY_SPOKEN.test(cleaned)) return cleaned;
+  switch (language) {
+    case "pt-PT": {
+      const rest = /^[ao]s?\s+/i.test(cleaned) ? cleaned : `a ${lowerFirst(cleaned)}`;
+      return `Fala ${rest}`;
+    }
+    case "en-GB":
+    case "en-US":
+      return `I'm calling from ${lowerFirst(cleaned)}`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
 }
 
 export function spokenAskFromObjective(input: {
@@ -260,9 +312,15 @@ function assertNaturalSpeech(spoken: string): string {
     .replace(/\broleplay\b[:\-–]?\s*/gi, "")
     .replace(/```[\s\S]*?```/g, "")
     .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\bseja bem[- ]vind[oa]s?\b[^.!?]*[.!?]?/gi, "")
+    .replace(/\bbem[- ]vind[oa]s? ao restaurante\b[^.!?]*[.!?]?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned;
+}
+
+function stripDiacritics(value: string): string {
+  return value.normalize("NFD").replace(/\p{M}/gu, "");
 }
 
 function firstSpokenSentence(text: string): string {

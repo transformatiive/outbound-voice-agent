@@ -2,16 +2,20 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./greeting.js";
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
+import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
+import { parseTtsProvider, type TtsProvider } from "./tts.js";
 import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
 
 const E164 = /^\+[1-9]\d{7,14}$/;
+const MAX_PERSONA_CHARS = 500;
 
 export type OutboundBody = {
   to?: unknown;
   language?: unknown;
   greeting?: unknown;
+  persona?: unknown;
   objective?: unknown;
   instructions?: unknown;
   metadata?: unknown;
@@ -19,6 +23,9 @@ export type OutboundBody = {
   waitForCallee?: unknown;
   timezone?: unknown;
   spokenAsk?: unknown;
+  tts_provider?: unknown;
+  bot_role?: unknown;
+  callee_role?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
@@ -43,6 +50,10 @@ export function parseOutboundBody(
         maxDurationSeconds?: number;
         waitForCallee: boolean;
         timezone: string;
+        persona?: string;
+        botRole: string;
+        calleeRole: string;
+        ttsProvider: TtsProvider;
       };
     }
   | { ok: false; error: OutboundError } {
@@ -58,6 +69,28 @@ export function parseOutboundBody(
       ok: false,
       error: { status: 400, error: "invalid_language", details: "language must be pt-PT | en-GB | en-US" },
     };
+  }
+  const ttsProviderParsed = parseTtsProvider(body.tts_provider);
+  if (!ttsProviderParsed.ok) {
+    return {
+      ok: false,
+      error: { status: 400, error: "invalid_tts_provider", details: "tts_provider must be grok | elevenlabs" },
+    };
+  }
+  const botRoleParsed = parseRoleLabel(body.bot_role, DEFAULT_BOT_ROLE);
+  if (!botRoleParsed.ok) {
+    return { ok: false, error: { status: 400, error: "invalid_bot_role" } };
+  }
+  const calleeRoleParsed = parseRoleLabel(body.callee_role, DEFAULT_CALLEE_ROLE);
+  if (!calleeRoleParsed.ok) {
+    return { ok: false, error: { status: 400, error: "invalid_callee_role" } };
+  }
+  if (body.persona !== undefined && body.persona !== null && body.persona !== "" && typeof body.persona !== "string") {
+    return { ok: false, error: { status: 400, error: "invalid_persona" } };
+  }
+  const personaRaw = typeof body.persona === "string" ? body.persona.trim() : "";
+  if (personaRaw.length > MAX_PERSONA_CHARS) {
+    return { ok: false, error: { status: 400, error: "invalid_persona" } };
   }
   const greetingRaw = typeof body.greeting === "string" ? body.greeting.trim() : "";
   const objective = typeof body.objective === "string" ? body.objective.trim() : "";
@@ -93,7 +126,7 @@ export function parseOutboundBody(
     body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
   const greeting = composeSpokenGreeting({
     language,
-    ...(greetingRaw ? { greeting: greetingRaw } : {}),
+    ...(personaRaw ? { persona: personaRaw } : greetingRaw ? { greeting: greetingRaw } : {}),
     objective,
     ...(spokenAskRaw ? { spokenAsk: spokenAskRaw } : {}),
     timezone,
@@ -116,6 +149,10 @@ export function parseOutboundBody(
       objective,
       waitForCallee,
       timezone,
+      botRole: botRoleParsed.value,
+      calleeRole: calleeRoleParsed.value,
+      ttsProvider: ttsProviderParsed.value,
+      ...(personaRaw ? { persona: personaRaw } : {}),
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
       ...(maxDurationSeconds !== undefined ? { maxDurationSeconds } : {}),
@@ -134,6 +171,20 @@ export async function placeOutboundCall(opts: {
   }
   const parsed = parseOutboundBody(opts.body);
   if (!parsed.ok) return { error: parsed.error };
+  if (parsed.value.ttsProvider === "elevenlabs" && !opts.config.elevenlabs.configured) {
+    return {
+      error: {
+        status: 503,
+        error: "elevenlabs_not_configured",
+        details: "ELEVENLABS_API_KEY is required for tts_provider=elevenlabs (set on Railway)",
+      },
+    };
+  }
+  if (parsed.value.ttsProvider === "elevenlabs") {
+    console.info(
+      `[outbound] tts_provider=elevenlabs requested; audio pipeline still grok (voice ${opts.config.grokVoice}) until ElevenLabs TTS is wired`,
+    );
+  }
 
   const id = randomUUID();
   const streamToken = randomBytes(24).toString("base64url");
@@ -147,6 +198,10 @@ export async function placeOutboundCall(opts: {
     objective: parsed.value.objective,
     ...(parsed.value.waitForCallee ? { waitForCallee: true } : {}),
     timezone: parsed.value.timezone,
+    botRole: parsed.value.botRole,
+    calleeRole: parsed.value.calleeRole,
+    ttsProvider: parsed.value.ttsProvider,
+    ...(parsed.value.persona ? { persona: parsed.value.persona } : {}),
     voice: opts.config.grokVoice,
     model: opts.config.grokModel,
     streamToken,

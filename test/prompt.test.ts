@@ -37,6 +37,12 @@ describe("prompt / language", () => {
     expect(text).toMatch(/português europeu/i);
     expect(text).toMatch(/telemóvel/);
     expect(text).toMatch(/nunca.*celular/i);
+    expect(text).toMatch(/NUNCA português do Brasil \(pt-BR\)|nunca «pt-BR»/i);
+    expect(text).toMatch(/Oi, tudo bem/i);
+    expect(text).toMatch(/bem-vindo ao restaurante/i);
+    expect(text).toMatch(/NUNCA és o restaurante/i);
+    expect(text).toMatch(/caller_booking/);
+    expect(text).toMatch(/venue_staff/);
     expect(text).toContain("Confirmar a marcação de quinta às 16h");
     expect(text).toMatch(/end_call/);
     expect(text).not.toMatch(/British English/i);
@@ -250,6 +256,8 @@ describe("prompt / language", () => {
       waitForCallee: true,
     });
     expect(pt).toMatch(/Foste tu a ligar/i);
+    expect(pt).toMatch(/NUNCA és o restaurante/i);
+    expect(pt).toMatch(/bem-vindo ao restaurante/i);
     expect(pt).toMatch(/fazer|confirmar|reserva|marcação/i);
     expect(pt).toMatch(/já estava marcado/i);
     expect(pt).toMatch(/NUNCA inventes nem desmintas|nunca desmintas/i);
@@ -267,6 +275,8 @@ describe("prompt / language", () => {
       waitForCallee: true,
     });
     expect(en).toMatch(/You placed this call/i);
+    expect(en).toMatch(/NEVER the restaurant/i);
+    expect(en).toMatch(/welcome to the restaurant/i);
     expect(en).toMatch(/make, confirm, or handle a booking|booking/i);
     expect(en).toMatch(/already booked|already confirmed/i);
     expect(en).toMatch(/NEVER invent or deny/i);

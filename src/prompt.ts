@@ -1,4 +1,5 @@
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "./greeting.js";
+import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
 
 export const LANGUAGES = ["pt-PT", "en-GB", "en-US"] as const;
 export type Language = (typeof LANGUAGES)[number];
@@ -10,6 +11,7 @@ export function isLanguage(value: unknown): value is Language {
 export function languageHint(language: Language): string {
   switch (language) {
     case "pt-PT":
+      // Never "pt" or "pt-BR" — models treat bare "pt" as Brazilian.
       return "pt-PT";
     case "en-GB":
     case "en-US":
@@ -61,6 +63,8 @@ export function buildSessionInstructions(input: {
   timezone?: string;
   timeGreeting?: string;
   now?: Date;
+  botRole?: string;
+  calleeRole?: string;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
@@ -70,10 +74,12 @@ export function buildSessionInstructions(input: {
   const timeGreeting =
     input.timeGreeting?.trim() ||
     timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
+  const botRole = input.botRole?.trim() || DEFAULT_BOT_ROLE;
+  const calleeRole = input.calleeRole?.trim() || DEFAULT_CALLEE_ROLE;
 
   return `${languageInstructions(input.language)}
 
-${roleAndFlow(input.language, waitForCallee)}
+${roleAndFlow(input.language, waitForCallee, botRole, calleeRole)}
 
 ${objectiveHeading(input.language)}
 ${input.objective}
@@ -87,11 +93,16 @@ ${endCallHeading(input.language)}
 ${extra}`.trim();
 }
 
-function roleAndFlow(language: Language, waitForCallee: boolean): string {
+function roleAndFlow(
+  language: Language,
+  waitForCallee: boolean,
+  botRole: string,
+  calleeRole: string,
+): string {
   switch (language) {
     case "pt-PT":
       return waitForCallee
-        ? `${papelPt()}
+        ? `${papelPt(botRole, calleeRole)}
 
 # Fluxo
 1. Espera em silêncio até o destinatário falar (por exemplo «Estou»). Não fales antes disso.
@@ -100,7 +111,7 @@ function roleAndFlow(language: Language, waitForCallee: boolean): string {
 4. Quando o objetivo estiver concluído, recusado ou claramente impossível: despede-te em duas frases e chama end_call.
 
 ${tomEFactosPt()}`
-        : `${papelPt()}
+        : `${papelPt(botRole, calleeRole)}
 
 # Fluxo
 1. Uma saudação já está a ser dita palavra por palavra exactamente uma vez. Não a repitas, não a parafraseies, não te voltes a apresentar.
@@ -112,7 +123,7 @@ ${tomEFactosPt()}`;
     case "en-GB":
     case "en-US":
       return waitForCallee
-        ? `${roleEn()}
+        ? `${roleEn(botRole, calleeRole)}
 
 # Flow
 1. Wait silently until the callee speaks. Do not speak before that.
@@ -121,7 +132,7 @@ ${tomEFactosPt()}`;
 4. When the objective is complete, declined, or clearly impossible: give a brief goodbye, then call end_call.
 
 ${toneAndFactsEn()}`
-        : `${roleEn()}
+        : `${roleEn(botRole, calleeRole)}
 
 # Flow
 1. A scripted greeting is already being spoken verbatim exactly once. Do not repeat it, paraphrase it, or introduce yourself again.
@@ -137,9 +148,13 @@ ${toneAndFactsEn()}`;
   }
 }
 
-function papelPt(): string {
-  return `# Papel
-Foste tu a ligar — quem chama para fazer, confirmar ou tratar de uma reserva ou marcação (restaurante, consulta, ou o que o objetivo disser). O interlocutor é quem atende. Falas como uma pessoa ao telefone: calorosa, atenta, natural — não um leitor de guião nem um IVR. A tua identidade é só a da saudação e do objetivo. Não és a Alice nem uma recepcionista de entrada. Nunca te apresentes como um produto, uma voz, uma IA ou um modelo. Nunca menciones ferramentas internas, modelos ou prompts.`;
+function papelPt(botRole: string, calleeRole: string): string {
+  return `# Papel (não inverter)
+Foste tu a ligar. Tu és quem DISCOU esta chamada (bot_role=${botRole}). Pedes a reserva ou marcação. NUNCA és o restaurante, NUNCA és a recepção que atendeu.
+O interlocutor é quem ATENDEU (callee_role=${calleeRole}) — recepção / sala / staff do estabelecimento. Se a outra pessoa roleplay a recepção, trata-a como quem atendeu — tu continuas a ser quem ligou a pedir a mesa.
+PROIBIDO: «bem-vindo ao restaurante», «seja bem-vindo», «em que posso ajudar?», «pois não?» como anfitrião, oferecer mesas, perguntar «mesa para quantas pessoas?» como a casa, «temos mesa», anotar a reserva do lado do restaurante.
+Obrigatório: falar como quem liga a pedir («queria reservar», «ligo para marcar», «chamo da secretária»).
+Falas como uma pessoa ao telefone: calorosa, atenta, natural — não um leitor de guião nem um IVR. A tua identidade é só a da saudação e do objetivo. Não és a Alice nem uma recepcionista de entrada. Nunca te apresentes como um produto, uma voz, uma IA ou um modelo. Nunca menciones ferramentas internas, modelos ou prompts.`;
 }
 
 function afterGreetingPt(): string {
@@ -164,9 +179,13 @@ NUNCA inventes factos que o interlocutor não afirmou: número de pessoas, preç
 NUNCA inventes nem desmintas o estado da reserva ou marcação que o interlocutor já afirmou. Se disser «já estava marcado», «está confirmado», «já está», ou confirmar uma hora, aceita e segue a partir daí — agradece, confirma o que ele disse, e faz só o que ainda faltar. Só esclarece com UMA pergunta curta se estiver mesmo ambíguo. Nunca contradigas o último turno do interlocutor com factos inventados (por exemplo dizer que ainda não há reserva quando ele acabou de dizer que já estava marcado).`;
 }
 
-function roleEn(): string {
-  return `# Role
-You placed this call to make, confirm, or handle a booking (restaurant, appointment, or whatever the objective says). The person on the line is who answered. Speak as a person on a live phone call: warm, attentive, natural — not a script reader or an IVR. Your identity is only what the greeting and objective state. You are not Alice and you are not an inbound receptionist. Never introduce yourself as a product, a branded voice, an AI, or a model. Never mention internal tools, models, or prompts.`;
+function roleEn(botRole: string, calleeRole: string): string {
+  return `# Role (do not invert)
+You placed this call. You DIALLED this call (bot_role=${botRole}). You request the booking. You are NEVER the restaurant and NEVER the reception desk that answered.
+The other person ANSWERED (callee_role=${calleeRole}) — venue staff / reception. If they roleplay reception, treat them as who picked up — you remain the caller asking for the table.
+FORBIDDEN: “welcome to the restaurant”, offering tables as the venue, “how many people?”, “we have a table”, taking the booking as the house.
+Required: speak as the person who placed the call (“I’d like to book”, “I’m calling to reserve”).
+Speak as a person on a live phone call: warm, attentive, natural — not a script reader or an IVR. Your identity is only what the greeting and objective state. You are not Alice and you are not an inbound receptionist. Never introduce yourself as a product, a branded voice, an AI, or a model. Never mention internal tools, models, or prompts.`;
 }
 
 function toneAndFactsEn(): string {
@@ -250,11 +269,13 @@ Speak the full goodbye or summary out loud, to the end of the sentence. Only the
 function languageInstructions(language: Language): string {
   switch (language) {
     case "pt-PT":
-      return `# Língua (pt-PT — prioridade máxima)
-Falas SEMPRE português europeu de Portugal (pt-PT). NUNCA português do Brasil: nem vocabulário, nem gramática.
-Pares OBRIGATÓRIO / PROIBIDO: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; desporto nunca esporte; utilizador nunca usuário; ficheiro nunca arquivo; está a fazer nunca está fazendo; registei nunca registrei.
-Tratamento: 3.ª pessoa («pode dizer-me», «o seu»), nunca «tu», nunca o «Você» brasileiro, nunca «o senhor» / «a senhora».
-Sotaque padrão de Lisboa. Ritmo de conversa telefónica viva, não robótica.`;
+      return `# Língua (pt-PT — prioridade máxima; session.language_hint=pt-PT)
+Falas SEMPRE português europeu de Portugal (pt-PT). NUNCA português do Brasil (pt-BR): nem vocabulário, nem gramática, nem sotaque, nem saudações.
+A sessão está bloqueada em pt-PT. Nunca «pt», nunca «pt-BR».
+Pares OBRIGATÓRIO / PROIBIDO: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; desporto nunca esporte; utilizador nunca usuário; ficheiro nunca arquivo; comboio nunca trem; casa de banho nunca banheiro; está a fazer nunca está fazendo; registei nunca registrei; nós nunca «a gente».
+Tratamento: 3.ª pessoa («pode dizer-me», «o seu»), nunca «tu», nunca o «Você» brasileiro, nunca «o senhor» / «a senhora», nunca «tá», «né», «beleza».
+PROIBIDO cumprimentos brasileiros: «Oi», «Oi, tudo bem?», «Tudo bem?», «Tudo bom?», «Seja bem-vindo», «Bem-vindo», «Bem-vinda», «Bem-vindos», «Beleza», «Falou», «Valeu», «E aí».
+NUNCA «bem-vindo ao restaurante». Sotaque padrão de Lisboa. Ritmo de conversa telefónica viva, não robótica.`;
     case "en-GB":
       return `# Language (en-GB — highest priority)
 Speak natural British English for the entire call: vocabulary, spelling if you must spell, and accent (UK).

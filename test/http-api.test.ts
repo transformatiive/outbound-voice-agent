@@ -19,6 +19,7 @@ const config: AppConfig = {
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
   grokVoiceSpeed: 1,
+  elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v3", configured: false },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
   calleeMinSpeechMs: 250,
@@ -29,7 +30,7 @@ const config: AppConfig = {
   webhookUrl: "https://example.up.railway.app/webhooks/telnyx",
   mediaStreamUrl: (callId, token) =>
     `wss://example.up.railway.app/media-stream?callId=${encodeURIComponent(callId)}&token=${encodeURIComponent(token)}`,
-  ready: { api: true, telnyx: true, xai: true, outbound: true },
+  ready: { api: true, telnyx: true, xai: true, outbound: true, elevenlabs: false },
 };
 
 function mockTelnyx(): TelnyxClient {
@@ -66,6 +67,13 @@ describe("HTTP API", () => {
     expect(res.body.telnyx.outboundVoiceProfileId).toBe("3041732644774610184");
     expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
     expect(res.body.ready.outbound).toBe(true);
+    expect(res.body.ready.elevenlabs).toBe(false);
+    expect(res.body.tts).toEqual({
+      default: "grok",
+      grokVoice: "ara",
+      elevenlabs: { configured: false, model: "eleven_v3", voiceId: "" },
+    });
+    expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
   });
 
   it("rejects outbound without Bearer API_KEY", async () => {
@@ -122,7 +130,9 @@ describe("HTTP API", () => {
     const gotUs = await request(app)
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotUs.body.greeting).toMatch(/^Hello, good (morning|afternoon|evening)\. Confirm Thursday at 4pm\.$/);
+    expect(gotUs.body.greeting).toMatch(
+      /^Hello, good (morning|afternoon|evening)\. I'm calling from the secretary\. Confirm Thursday at 4pm\.$/,
+    );
     expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
     const badTo = await request(app)
@@ -276,7 +286,9 @@ describe("HTTP API", () => {
     const gotPt = await request(app)
       .get(`/api/calls/${omittedPt.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotPt.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Confirmar a marcação\.$/);
+    expect(gotPt.body.greeting).toMatch(
+      /^Olá, (bom dia|boa tarde|boa noite)\. Ligo da secretária\. Confirmar a marcação\.$/,
+    );
     expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
 
     const waitMissing = await request(app)
@@ -293,7 +305,9 @@ describe("HTTP API", () => {
     const gotWait = await request(app)
       .get(`/api/calls/${waitMissing.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(gotWait.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Confirmar a marcação\.$/);
+    expect(gotWait.body.greeting).toMatch(
+      /^Olá, (bom dia|boa tarde|boa noite)\. Ligo da secretária\. Confirmar a marcação\.$/,
+    );
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
 
@@ -335,7 +349,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     const unready = {
       ...config,
       telnyxConnectionId: "",
-      ready: { api: true, telnyx: false, xai: true, outbound: false },
+      ready: { api: true, telnyx: false, xai: true, outbound: false, elevenlabs: false },
     };
     const { app } = createApp({ config: unready, telnyx });
     const res = await request(app)
@@ -349,5 +363,83 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       });
     expect(res.status).toBe(503);
     expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 elevenlabs_not_configured when tts_provider is elevenlabs without keys", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "elevenlabs",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("elevenlabs_not_configured");
+    expect(res.body.details).toMatch(/ELEVENLABS_API_KEY/);
+    expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it("accepts tts_provider=elevenlabs when configured but still dials with Grok voice ara", async () => {
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "el-voice",
+        model: "eleven_v3",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app } = createApp({ config: withLabs, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: "secretária da empresa",
+        objective: "Reservar uma mesa para quinta.",
+        tts_provider: "elevenlabs",
+        bot_role: "caller_booking",
+        callee_role: "venue_staff",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.ttsProvider).toBe("elevenlabs");
+    expect(res.body.voice).toBe("ara");
+    expect(res.body.botRole).toBe("caller_booking");
+    expect(res.body.calleeRole).toBe("venue_staff");
+    expect(res.body.language).toBe("pt-PT");
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+
+    const got = await request(app)
+      .get(`/api/calls/${res.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.body.ttsProvider).toBe("elevenlabs");
+    expect(got.body.persona).toBe("secretária da empresa");
+    expect(got.body.greeting).toMatch(/Fala a secretária da empresa/);
+    expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
+    expect(got.body.voice).toBe("ara");
+  });
+
+  it("defaults tts_provider grok and echoes roles on POST /api/outbound", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        objective: "Confirmar a marcação",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.ttsProvider).toBe("grok");
+    expect(res.body.botRole).toBe("caller_booking");
+    expect(res.body.calleeRole).toBe("venue_staff");
+    expect(res.body.voice).toBe("ara");
   });
 });

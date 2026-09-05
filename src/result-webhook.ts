@@ -1,4 +1,5 @@
 import type { CallRecord } from "./calls/types.js";
+import { DEFAULT_TTS_PROVIDER } from "./tts.js";
 
 export async function notifyResultWebhook(
   url: string | undefined,
@@ -16,6 +17,10 @@ export async function notifyResultWebhook(
     objective: call.objective,
     voice: call.voice,
     model: call.model,
+    ttsProvider: call.ttsProvider ?? DEFAULT_TTS_PROVIDER,
+    botRole: call.botRole,
+    calleeRole: call.calleeRole,
+    persona: call.persona,
     transcript: call.transcript,
     endedReason: call.endedReason,
     createdAt: call.createdAt,

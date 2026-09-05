@@ -23,6 +23,8 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(payload.session.instructions).toMatch(/português europeu/i);
+    expect(payload.session.instructions).toMatch(/pt-BR/);
+    expect(payload.session.instructions).toMatch(/NUNCA és o restaurante/);
     expect(payload.session.instructions).not.toMatch(/\bAra\b/);
     expect(payload.session.instructions).not.toMatch(/gravad/i);
     expect(payload.session.turn_detection).toEqual({

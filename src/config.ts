@@ -7,12 +7,14 @@ import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
 } from "./bridge/callee-speech.js";
+import { elevenlabsConfigFromEnv, type ElevenLabsConfig } from "./tts.js";
 
 export type ReadyFlags = {
   api: boolean;
   telnyx: boolean;
   xai: boolean;
   outbound: boolean;
+  elevenlabs: boolean;
 };
 
 export type AppConfig = {
@@ -29,6 +31,7 @@ export type AppConfig = {
   grokVoice: string;
   grokModel: string;
   grokVoiceSpeed: number;
+  elevenlabs: ElevenLabsConfig;
   turnDetection: TurnDetectionSettings;
   calleeSpeechGraceMs: number;
   calleeMinSpeechMs: number;
@@ -109,6 +112,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const hangupPlayoutBufferMs = Math.round(
     envNumber(env, "GROK_HANGUP_PLAYOUT_MS", 1000, 0, 8000),
   );
+  const elevenlabs = elevenlabsConfigFromEnv(env);
   const resultWebhook = env.RESULT_WEBHOOK?.trim() || undefined;
   const telnyxPublicKey = env.TELNYX_PUBLIC_KEY?.trim() || undefined;
   const xaiBaseUrl = trimSlash(env.XAI_BASE_URL?.trim() || "https://api.x.ai");
@@ -121,6 +125,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     telnyx: Boolean(telnyxApiKey && telnyxConnectionId),
     xai: Boolean(xaiApiKey),
     outbound: false,
+    elevenlabs: elevenlabs.configured,
   };
   ready.outbound = ready.api && ready.telnyx && ready.xai && Boolean(publicBaseUrl);
 
@@ -141,6 +146,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     grokVoice,
     grokModel,
     grokVoiceSpeed,
+    elevenlabs,
     turnDetection,
     calleeSpeechGraceMs,
     calleeMinSpeechMs,
