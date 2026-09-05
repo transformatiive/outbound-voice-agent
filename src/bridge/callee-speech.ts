@@ -1,4 +1,4 @@
-export const DEFAULT_CALLEE_SPEECH_GRACE_MS = 1000;
+export const DEFAULT_CALLEE_SPEECH_GRACE_MS = 500;
 /** Word-length floor after grace. «Estou» is often ~120–180ms; 250ms was too strict. */
 export const DEFAULT_CALLEE_MIN_SPEECH_MS = 130;
 
@@ -11,6 +11,7 @@ export type CalleeSpeechGate = {
   streamStartedAtMs: number | undefined;
   acceptedSpeechStartedAtMs: number | undefined;
   lastSpeechStartedAtMs: number | undefined;
+  pendingPostGraceUnlock: boolean;
 };
 
 export type CalleeSpeechBlockReason =
@@ -21,7 +22,11 @@ export type CalleeSpeechBlockReason =
   | "speech_too_short"
   | "no_accepted_utterance";
 
-export type CalleeSpeechUnlockReason = "non_empty_transcript" | "short_greeting" | "min_speech_duration";
+export type CalleeSpeechUnlockReason =
+  | "non_empty_transcript"
+  | "short_greeting"
+  | "min_speech_duration"
+  | "grace_elapsed";
 
 export type CalleeSpeechDecision =
   | { unlock: false; reason: CalleeSpeechBlockReason }
@@ -35,6 +40,7 @@ export function createCalleeSpeechGate(): CalleeSpeechGate {
     streamStartedAtMs: undefined,
     acceptedSpeechStartedAtMs: undefined,
     lastSpeechStartedAtMs: undefined,
+    pendingPostGraceUnlock: false,
   };
 }
 
@@ -42,6 +48,16 @@ export function noteStreamStart(gate: CalleeSpeechGate, atMs: number): void {
   gate.streamStartedAtMs = atMs;
   gate.acceptedSpeechStartedAtMs = undefined;
   gate.lastSpeechStartedAtMs = undefined;
+  gate.pendingPostGraceUnlock = false;
+}
+
+export function hasPendingPostGraceUnlock(gate: CalleeSpeechGate): boolean {
+  return gate.pendingPostGraceUnlock;
+}
+
+export function msSinceStreamStart(gate: CalleeSpeechGate, atMs: number): number | undefined {
+  if (gate.streamStartedAtMs === undefined) return undefined;
+  return Math.max(0, atMs - gate.streamStartedAtMs);
 }
 
 export function isNonEmptyCalleeTranscript(text: string): boolean {
@@ -71,6 +87,10 @@ export function onSpeechStarted(
     gate.acceptedSpeechStartedAtMs = undefined;
     return { unlock: false, reason: "grace_period" };
   }
+  if (gate.pendingPostGraceUnlock) {
+    gate.pendingPostGraceUnlock = false;
+    return { unlock: true, reason: "grace_elapsed" };
+  }
   gate.acceptedSpeechStartedAtMs = atMs;
   return { unlock: false, reason: "awaiting_min_duration" };
 }
@@ -88,14 +108,20 @@ export function onSpeechStopped(
   gate.acceptedSpeechStartedAtMs = undefined;
   gate.lastSpeechStartedAtMs = undefined;
 
+  const durationMs = utteranceDurationMs(atMs, acceptedAt, lastStartedAt, audioDurationMs);
+
   if (inGrace(gate, atMs, config.graceMs)) {
+    if (durationMs >= config.minSpeechMs) gate.pendingPostGraceUnlock = true;
     return { unlock: false, reason: "grace_period" };
+  }
+  if (gate.pendingPostGraceUnlock) {
+    gate.pendingPostGraceUnlock = false;
+    return { unlock: true, reason: "grace_elapsed" };
   }
   if (acceptedAt === undefined && lastStartedAt === undefined && audioDurationMs === undefined) {
     return { unlock: false, reason: "no_accepted_utterance" };
   }
 
-  const durationMs = utteranceDurationMs(atMs, acceptedAt, lastStartedAt, audioDurationMs);
   if (durationMs < config.minSpeechMs) return { unlock: false, reason: "speech_too_short" };
   return { unlock: true, reason: "min_speech_duration" };
 }
@@ -105,6 +131,19 @@ export function onTranscript(waiting: boolean, text: string): CalleeSpeechDecisi
   if (isShortCalleeGreeting(text)) return { unlock: true, reason: "short_greeting" };
   if (!isNonEmptyCalleeTranscript(text)) return { unlock: false, reason: "empty_transcript" };
   return { unlock: true, reason: "non_empty_transcript" };
+}
+
+export function onPostGraceCheck(
+  gate: CalleeSpeechGate,
+  waiting: boolean,
+  atMs: number,
+  config: CalleeSpeechGateConfig,
+): CalleeSpeechDecision {
+  if (!waiting) return { unlock: false, reason: "not_waiting" };
+  if (inGrace(gate, atMs, config.graceMs)) return { unlock: false, reason: "grace_period" };
+  if (!gate.pendingPostGraceUnlock) return { unlock: false, reason: "no_accepted_utterance" };
+  gate.pendingPostGraceUnlock = false;
+  return { unlock: true, reason: "grace_elapsed" };
 }
 
 function utteranceDurationMs(

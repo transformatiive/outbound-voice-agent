@@ -242,6 +242,40 @@ describe("prompt / language", () => {
     }
   });
 
+  it("tracks booking/roleplay state from the interlocutor and never contradicts it", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Fala a secretária.",
+      objective: "ROLEPLAY: quem atende. Reservar mesa no restaurante.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/Foste tu a ligar/i);
+    expect(pt).toMatch(/fazer|confirmar|reserva|marcação/i);
+    expect(pt).toMatch(/já estava marcado/i);
+    expect(pt).toMatch(/NUNCA inventes nem desmintas|nunca desmintas/i);
+    expect(pt).toMatch(/último turno/i);
+    expect(pt).toMatch(/NUNCA leias[\s\S]*ROLEPLAY/);
+    expect(pt).toMatch(/exactamente uma vez/);
+    expect(pt).toMatch(/certo/);
+    expect(pt).toMatch(/perfeito/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good morning.",
+      objective: "Book a table at the restaurant.",
+      waitForCallee: true,
+    });
+    expect(en).toMatch(/You placed this call/i);
+    expect(en).toMatch(/make, confirm, or handle a booking|booking/i);
+    expect(en).toMatch(/already booked|already confirmed/i);
+    expect(en).toMatch(/NEVER invent or deny/i);
+    expect(en).toMatch(/last turn/i);
+    expect(en).toMatch(/exactly once/);
+    expect(en).toMatch(/Spoken word only/);
+    assertNoSpokenBranding(en);
+  });
+
   it("asks for a human phone voice: warmth, certo/perfeito, no numbered lists, no ROLEPLAY dump", () => {
     const pt = buildSessionInstructions({
       language: "pt-PT",

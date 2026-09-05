@@ -22,7 +22,7 @@ describe("config", () => {
       prefixPaddingMs: 200,
       idleTimeoutMs: 12_000,
     });
-    expect(cfg.calleeSpeechGraceMs).toBe(1000);
+    expect(cfg.calleeSpeechGraceMs).toBe(500);
     expect(cfg.calleeMinSpeechMs).toBe(130);
     expect(cfg.hangupPlayoutBufferMs).toBe(1000);
   });
