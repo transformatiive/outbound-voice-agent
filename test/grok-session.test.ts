@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grokRealtimeUrl, sessionUpdatePayload } from "../src/grok/session.js";
+import { grokRealtimeUrl, sessionUpdatePayload, GROK_REASONING_EFFORT } from "../src/grok/session.js";
 
 describe("Grok Voice Live 2 session", () => {
   it("targets the xAI realtime websocket with the configured model", () => {
@@ -36,7 +36,14 @@ describe("Grok Voice Live 2 session", () => {
       create_response: true,
       interrupt_response: true,
     });
-    expect(payload.session.reasoning).toEqual({ effort: "none" });
+    expect(payload.session.reasoning).toEqual({ effort: GROK_REASONING_EFFORT });
+    expect(GROK_REASONING_EFFORT).toBe("none");
+    expect(payload.session.tools[0]?.description).toMatch(/thank-you/i);
+    expect(payload.session.tools[0]?.description).not.toMatch(/summary/i);
+    expect(payload.session.tools[0]?.description).toMatch(/recap/i);
+    expect(payload.session.instructions).toMatch(/então fica marcado para/);
+    expect(payload.session.instructions).toMatch(/Não narres/i);
+    expect(payload.session.instructions).not.toMatch(/confirma os detalhes numa frase/);
   });
 
   it("puts wait-for-callee flow into session instructions when waitForCallee is true", () => {

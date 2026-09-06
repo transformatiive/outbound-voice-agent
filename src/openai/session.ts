@@ -1,4 +1,4 @@
-import { buildSessionInstructions, type Language } from "../prompt.js";
+import { END_CALL_TOOL_DESCRIPTION, buildSessionInstructions, type Language } from "../prompt.js";
 import type { TurnDetectionSettings } from "../grok/session.js";
 import { DEFAULT_TURN_DETECTION } from "../grok/session.js";
 import { DEFAULT_OPENAI_VOICE } from "../tts.js";
@@ -77,8 +77,7 @@ export type OpenAIGreetingResponseCreate = {
 const END_CALL_TOOL: OpenAIFunctionTool = {
   type: "function",
   name: "end_call",
-  description:
-    "Hang up only after you have fully spoken the goodbye or summary. Never cut a sentence short. Use when the objective is complete, declined, or impossible.",
+  description: END_CALL_TOOL_DESCRIPTION,
   parameters: {
     type: "object",
     additionalProperties: false,
