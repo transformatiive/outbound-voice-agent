@@ -1,4 +1,4 @@
-import { buildSessionInstructions, languageHint, type Language } from "../prompt.js";
+import { END_CALL_TOOL_DESCRIPTION, buildSessionInstructions, languageHint, type Language } from "../prompt.js";
 
 export type GrokFunctionTool = {
   type: "function";
@@ -46,8 +46,15 @@ export const DEFAULT_TURN_DETECTION: TurnDetectionSettings = {
   idleTimeoutMs: 12_000,
 };
 
-/** Documented xAI session.audio.output.speed range is 0.7–1.5. Slight liveliness nudge above API default 1.0. */
+/** Documented xAI session.audio.output.speed range is 0.7–1.5. Slight liveliness nudge above API default 1.0. Do not raise to hide thinking pause. */
 export const DEFAULT_OUTPUT_SPEED = 1.05;
+
+/**
+ * xAI Voice Live `session.reasoning.effort`. API default is `high` (pre-audio
+ * thinking pause). `none` is the only documented session knob that cuts that
+ * delay without changing voice (`ara`) or `audio.output.speed` (keep 1.05).
+ */
+export const GROK_REASONING_EFFORT = "none" as const;
 
 export type GrokSessionUpdate = {
   type: "session.update";
@@ -55,7 +62,7 @@ export type GrokSessionUpdate = {
     voice: string;
     instructions: string;
     turn_detection: GrokTurnDetection;
-    reasoning: { effort: "none" | "high" };
+    reasoning: { effort: typeof GROK_REASONING_EFFORT | "high" };
     audio: {
       input: {
         format: { type: "audio/pcmu" };
@@ -126,7 +133,7 @@ export function sessionUpdatePayload(input: {
         createResponse,
         includeIdleTimeout,
       }),
-      reasoning: { effort: "none" },
+      reasoning: { effort: GROK_REASONING_EFFORT },
       audio: {
         input: {
           format: { type: "audio/pcmu" },
@@ -138,8 +145,7 @@ export function sessionUpdatePayload(input: {
         {
           type: "function",
           name: "end_call",
-          description:
-            "Hang up only after you have fully spoken the goodbye or summary. Never cut a sentence short. Use when the objective is complete, declined, or impossible.",
+          description: END_CALL_TOOL_DESCRIPTION,
           parameters: {
             type: "object",
             additionalProperties: false,

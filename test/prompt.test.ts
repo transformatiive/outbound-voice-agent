@@ -129,7 +129,7 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/Não fales antes/);
     expect(pt).toMatch(/depois de o destinatário falar/i);
     expect(pt).toMatch(/exactamente uma vez/);
-    expect(pt).toMatch(/Uma pergunta de cada vez/);
+    expect(pt).toMatch(/Uma pergunta/);
     expect(pt).toMatch(/NUNCA inventes factos/);
     expect(pt).not.toMatch(/já está a ser dita/i);
     expect(pt).not.toMatch(/Saudação já entregue \(uma vez/);
@@ -145,7 +145,7 @@ describe("prompt / language", () => {
     expect(en).toMatch(/Do not speak before that/);
     expect(en).toMatch(/After the greeting/i);
     expect(en).toMatch(/exactly once/);
-    expect(en).toMatch(/One question at a time/);
+    expect(en).toMatch(/One question/);
     expect(en).toMatch(/NEVER invent facts/);
     expect(en).not.toMatch(/already being spoken/i);
     expect(en).not.toMatch(/Greeting already delivered \(once/);
@@ -324,7 +324,7 @@ describe("prompt / language", () => {
     expect(en).toMatch(/numbered lists/);
     expect(en).toMatch(/natural confirmations/);
     expect(en).toMatch(/perfect/);
-    expect(en).toMatch(/full goodbye/);
+    expect(en).toMatch(/thank-you|thank them/i);
     expect(en).toMatch(/Spoken word only/);
     assertNoSpokenBranding(en);
   });
@@ -340,7 +340,6 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/para quantas pessoas\?/);
     expect(pt).toMatch(/tá marcado/);
     expect(pt).toMatch(/mesa para 2, nome Nuno Barreto/);
-    expect(pt).toMatch(/confirma os detalhes numa frase/);
     expect(pt).toMatch(/end_call/);
     assertNoSpokenBranding(pt);
 
@@ -355,6 +354,78 @@ describe("prompt / language", () => {
     expect(en).toMatch(/table for 2, name Nuno Barreto/);
     expect(en).toMatch(/After the venue confirms/);
     expect(en).toMatch(/thank them/i);
+    assertNoSpokenBranding(en);
+  });
+
+  it("closes with a warm thank-you only — never recaps confirmed details", () => {
+    const languages: Language[] = ["pt-PT", "en-GB", "en-US"];
+    for (const language of languages) {
+      for (const waitForCallee of [false, true]) {
+        const text = buildSessionInstructions({
+          language,
+          greeting: defaultGreeting(language),
+          objective: "Marcar mesa para 2, nome Nuno Barreto, hoje às 20h.",
+          waitForCallee,
+        });
+        expect(text).not.toMatch(/confirma os detalhes numa frase/);
+        expect(text).not.toMatch(/confirm the details in one sentence/);
+        expect(text).not.toMatch(/despedida ou o resumo/);
+        expect(text).not.toMatch(/goodbye or summary/i);
+        expect(text).toMatch(/end_call/);
+        if (language === "pt-PT") {
+          expect(text).toMatch(/Encerramento/);
+          expect(text).toMatch(/prioridade máxima/);
+          expect(text).toMatch(/então fica marcado para/);
+          expect(text).toMatch(/hora.*pessoas.*nome|pessoas.*nome.*hora/s);
+          expect(text).toMatch(/agradece/i);
+          expect(text).toMatch(/sem recap|NÃO recapitul|não restates|sem resum/i);
+          expect(text).toMatch(/calorosa/);
+        } else {
+          expect(text).toMatch(/Closing \(highest priority/);
+          expect(text).toMatch(/Do NOT restate or summarize confirmed details/i);
+          expect(text).toMatch(/time, (party size|headcount|people), name/i);
+          expect(text).toMatch(/thank them/i);
+          expect(text).toMatch(/so that’s booked for|so that's booked for/);
+        }
+        if (waitForCallee) {
+          if (language === "pt-PT") {
+            expect(text).toMatch(/Espera em silêncio até o destinatário falar/i);
+          } else {
+            expect(text).toMatch(/Wait silently until the callee speaks/i);
+          }
+        }
+        assertNoSpokenBranding(text);
+      }
+    }
+  });
+
+  it("hardens snappy phone turns: reply now, no planning narration, no brief re-list", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Olá, boa tarde. Fala a secretária.",
+      objective: "Reservar mesa para 2 hoje à noite.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/Não narres/i);
+    expect(pt).toMatch(/briefing|objetivo/);
+    expect(pt).toMatch(/Uma pergunta/i);
+    expect(pt).toMatch(/uma confirmação/i);
+    expect(pt).toMatch(/Responde (já|no instante)/);
+    expect(pt).toMatch(/frases curtas/);
+    expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Hello, good evening.",
+      objective: "Book a table for 2 tonight.",
+    });
+    expect(en).toMatch(/Do not narrate planning/i);
+    expect(en).toMatch(/re-list the (brief|objective)/i);
+    expect(en).toMatch(/one question/i);
+    expect(en).toMatch(/one (short )?confirmation/i);
+    expect(en).toMatch(/Reply immediately|Answer the instant/i);
+    expect(en).toMatch(/short sentences/i);
     assertNoSpokenBranding(en);
   });
 
