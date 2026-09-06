@@ -619,6 +619,54 @@ describe("media bridge Telnyx ↔ Grok", () => {
     ]);
   });
 
+  it("plays a warm Grok greeting cache on unlock with no session.update before first Telnyx media", async () => {
+    const order: string[] = [];
+    const grokSend = vi.fn((msg: { type?: string }) => {
+      order.push(`grok:${String(msg.type)}`);
+    });
+    const telnyxSend = vi.fn((msg: { event?: string }) => {
+      order.push(`telnyx:${String(msg.event)}`);
+    });
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    expect(order.filter((e) => e === "grok:session.update")).toHaveLength(1);
+
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "greet-warm" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "WARMFRAME" });
+    await bridge.onGrokEvent({ type: "response.done", response_id: "greet-warm" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(responseCreateCount(grokSend)).toBe(0);
+
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    order.length = 0;
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Estou",
+    });
+    await flushMicrotasks();
+
+    expect(order[0]).not.toBe("grok:session.update");
+    expect(order.filter((e) => e === "telnyx:media" || e === "grok:session.update")).toEqual([
+      "telnyx:media",
+      "grok:session.update",
+    ]);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "WARMFRAME" } });
+    expect(responseCreateCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(0);
+    const talkingUpdate = grokSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0] as {
+      session?: { turn_detection?: { create_response?: boolean } };
+    };
+    expect(talkingUpdate?.session?.turn_detection?.create_response).toBe(true);
+  });
+
   it("does not speak on session.updated when waitForCallee is true", async () => {
     const grokSend = vi.fn();
     const telnyxSend = vi.fn();

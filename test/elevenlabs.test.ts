@@ -73,7 +73,7 @@ describe("ElevenLabs HTTP TTS", () => {
       expect((init?.headers as Record<string, string>)["xi-api-key"]).toBe("el-key");
       const body = JSON.parse(String(init?.body));
       expect(body).toEqual({
-        text: "Olá, boa tarde.",
+        text: "[warmly] Olá, boa tarde.",
         model_id: DEFAULT_ELEVENLABS_MODEL,
         language_code: "pt",
       });
@@ -256,12 +256,45 @@ describe("ElevenLabs HTTP TTS", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("omits optimize_streaming_latency and tags speech for eleven_v3_conversational", async () => {
+    const payload = Buffer.alloc(160, 0x7f);
+    const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
+      expect(String(url)).not.toContain("optimize_streaming_latency");
+      const body = JSON.parse(String(init?.body));
+      expect(body).not.toHaveProperty("optimize_streaming_latency");
+      expect(body.model_id).toBe("eleven_v3_conversational");
+      expect(body.text).toBe("[warmly] Olá.");
+      return new Response(payload, { status: 200 });
+    });
+    const frames: string[] = [];
+    for await (const frame of streamElevenLabsPcmu({
+      config: {
+        apiKey: "el-key",
+        voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+        model: "eleven_v3_conversational",
+        configured: true,
+        optimizeStreamingLatency: 3,
+      },
+      text: "Olá.",
+      language: "pt-PT",
+      signal: new AbortController().signal,
+      fetchImpl,
+    })) {
+      frames.push(frame);
+    }
+    expect(frames).toHaveLength(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("sends optimize_streaming_latency=3 for flash, turbo, and multilingual_v2", async () => {
     const payload = Buffer.alloc(160, 0x7f);
     for (const model of ["eleven_flash_v2_5", "eleven_turbo_v2_5", "multilingual_v2"] as const) {
       const fetchImpl = vi.fn<typeof fetch>(async (url, init) => {
         expect(String(url)).toContain("optimize_streaming_latency=3");
-        expect(JSON.parse(String(init?.body))).not.toHaveProperty("optimize_streaming_latency");
+        const body = JSON.parse(String(init?.body));
+        expect(body).not.toHaveProperty("optimize_streaming_latency");
+        expect(body.text).toBe("Hello.");
+        expect(String(body.text)).not.toMatch(/\[warmly\]|\[curious\]|\[sighs\]/);
         return new Response(payload, { status: 200 });
       });
       for await (const _frame of streamElevenLabsPcmu({
@@ -337,6 +370,20 @@ describe("ElevenLabs HTTP TTS", () => {
 
   it("classifies the live eleven_v3 400 as an optimize-latency rejection", () => {
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3_conversational")).toBe(false);
+    expect(
+      elevenLabsStreamUrl(
+        {
+          apiKey: "el-key",
+          voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+          model: "eleven_v3_conversational",
+          configured: true,
+          optimizeStreamingLatency: 3,
+        },
+        "ulaw_8000",
+        false,
+      ),
+    ).not.toContain("optimize_streaming_latency");
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_flash_v2_5")).toBe(true);
     expect(
       elevenLabsOptimizeLatencyRejected(

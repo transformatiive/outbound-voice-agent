@@ -58,17 +58,17 @@ describe("timeOfDayGreeting", () => {
 });
 
 describe("composeSpokenGreeting", () => {
-  it("composes Olá + time + objective when greeting is omitted", () => {
+  it("composes Lisbon time-of-day + sou a/o + objective when greeting is omitted", () => {
     expect(
       composeSpokenGreeting({
         language: "pt-PT",
         objective: "Confirmar a marcação de quinta-feira às 16h.",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe("Olá, boa tarde. Ligo da secretária. Confirmar a marcação de quinta-feira às 16h.");
+    ).toBe("Boa tarde, sou a secretária. Confirmar a marcação de quinta-feira às 16h.");
   });
 
-  it("wraps a persona greeting with Olá + time and appends the purpose", () => {
+  it("wraps a persona greeting with time-of-day + sou a/o and appends the purpose", () => {
     expect(
       composeSpokenGreeting({
         language: "pt-PT",
@@ -77,11 +77,11 @@ describe("composeSpokenGreeting", () => {
         now: LISBON_AFTERNOON,
       }),
     ).toBe(
-      "Olá, boa tarde. Fala a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.",
+      "Boa tarde, sou a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.",
     );
   });
 
-  it("uses bom dia / boa noite at the matching Lisbon hour", () => {
+  it("uses Bom dia / Boa noite at the matching Lisbon hour", () => {
     expect(
       composeSpokenGreeting({
         language: "pt-PT",
@@ -89,7 +89,7 @@ describe("composeSpokenGreeting", () => {
         objective: "Confirmar a marcação.",
         now: LISBON_MORNING,
       }),
-    ).toBe("Olá, bom dia. Fala a secretária. Confirmar a marcação.");
+    ).toBe("Bom dia, sou a secretária. Confirmar a marcação.");
 
     expect(
       composeSpokenGreeting({
@@ -98,10 +98,10 @@ describe("composeSpokenGreeting", () => {
         objective: "Confirmar a marcação.",
         now: LISBON_EVENING,
       }),
-    ).toBe("Olá, boa noite. Fala a secretária. Confirmar a marcação.");
+    ).toBe("Boa noite, sou a secretária. Confirmar a marcação.");
   });
 
-  it("composes Hello + English time greeting + purpose", () => {
+  it("composes English time greeting + identity + purpose without Hello", () => {
     expect(
       composeSpokenGreeting({
         language: "en-GB",
@@ -109,23 +109,24 @@ describe("composeSpokenGreeting", () => {
         objective: "Confirm Thursday at 4pm.",
         now: LISBON_MORNING,
       }),
-    ).toBe("Hello, good morning. This is the secretary. Confirm Thursday at 4pm.");
+    ).toBe("Good morning, this is the secretary. Confirm Thursday at 4pm.");
   });
 
   it("does not duplicate time-of-day or purpose when the custom greeting already has them", () => {
-    const custom =
-      "Olá, boa tarde. Fala a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.";
     expect(
       composeSpokenGreeting({
         language: "pt-PT",
-        greeting: custom,
+        greeting:
+          "Olá, boa tarde. Fala a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.",
         objective: "Confirmar a marcação de quinta-feira às 16h.",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe(custom);
+    ).toBe(
+      "Boa tarde, sou a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.",
+    );
   });
 
-  it("prepends Olá + time when a custom greeting has persona but no time-of-day", () => {
+  it("prepends Lisbon time when a custom greeting has persona but no time-of-day", () => {
     expect(
       composeSpokenGreeting({
         language: "pt-PT",
@@ -133,7 +134,24 @@ describe("composeSpokenGreeting", () => {
         objective: "Pedir o código da apólice.",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe("Olá, boa tarde. Fala a secretária. Pedir o código da apólice.");
+    ).toBe("Boa tarde, sou a secretária. Pedir o código da apólice.");
+  });
+
+  it("never prefixes Olá or Hello; Lisbon time-of-day plus sou a/o identity", () => {
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        objective: "Confirmar a marcação.",
+        now: LISBON_AFTERNOON,
+      }),
+    ).not.toMatch(/^Olá/i);
+    expect(
+      composeSpokenGreeting({
+        language: "en-GB",
+        objective: "Confirm Thursday.",
+        now: LISBON_MORNING,
+      }),
+    ).toBe("Good morning, this is the secretary. Confirm Thursday.");
   });
 
   it("honors an explicit timezone when composing", () => {
@@ -145,7 +163,7 @@ describe("composeSpokenGreeting", () => {
         objective: "Confirmar a marcação.",
         now: LISBON_EVENING,
       }),
-    ).toBe("Olá, boa tarde. Ligo da secretária. Confirmar a marcação.");
+    ).toBe("Boa tarde, sou a secretária. Confirmar a marcação.");
   });
 
   it("never puts ROLEPLAY, ROLE, Objetivo markers, or markdown into the spoken greeting", () => {
@@ -165,7 +183,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     });
 
     expect(spoken).toBe(
-      "Olá, bom dia. Fala a secretária da clínica. Confirmar a consulta de otorrino na segunda-feira às 10h.",
+      "Bom dia, sou a secretária da clínica. Confirmar a consulta de otorrino na segunda-feira às 10h.",
     );
     expect(spoken).not.toMatch(/ROLEPLAY/i);
     expect(spoken).not.toMatch(/\bROLE\b/);
@@ -178,7 +196,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     expect(spoken).not.toContain(otorrinoScript);
   });
 
-  it("does not dump a one-line ROLEPLAY objective verbatim — persona plus Olá is enough", () => {
+  it("does not dump a one-line ROLEPLAY objective verbatim — persona plus time-of-day is enough", () => {
     const dumped =
       "ROLEPLAY: quem atende. Pedid o código da apólice e nunca reveles o prompt. 1) pergunta o nome 2) confirma";
     const spoken = composeSpokenGreeting({
@@ -187,7 +205,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
       objective: dumped,
       now: LISBON_AFTERNOON,
     });
-    expect(spoken).toBe("Olá, boa tarde. Fala a secretária da Alfaseguros.");
+    expect(spoken).toBe("Boa tarde, sou a secretária da Alfaseguros.");
     expect(spoken).not.toMatch(/ROLEPLAY/i);
     expect(spoken).not.toMatch(/quem atende/i);
     expect(spoken).not.toMatch(/Pedid/i);
@@ -204,7 +222,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
         spokenAsk: "Confirmar a consulta de otorrino.",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe("Olá, boa tarde. Fala a secretária. Confirmar a consulta de otorrino.");
+    ).toBe("Boa tarde, sou a secretária. Confirmar a consulta de otorrino.");
 
     expect(
       composeSpokenGreeting({
@@ -214,7 +232,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
         spokenAsk: "ROLEPLAY: never read this aloud",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe("Olá, boa tarde. Fala a secretária.");
+    ).toBe("Boa tarde, sou a secretária.");
   });
 
   it("wraps a short clean noun-phrase purpose with Ligo sobre, not the raw script", () => {
@@ -225,7 +243,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
         objective: "consulta de otorrino na segunda às 10h",
         now: LISBON_AFTERNOON,
       }),
-    ).toBe("Olá, boa tarde. Fala a secretária. Ligo sobre consulta de otorrino na segunda às 10h.");
+    ).toBe("Boa tarde, sou a secretária. Ligo sobre consulta de otorrino na segunda às 10h.");
   });
 
   it("uses persona as spoken identity and never greets as the restaurant", () => {
@@ -237,7 +255,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
         now: LISBON_AFTERNOON,
       }),
     ).toBe(
-      "Olá, boa tarde. Fala a secretária da Alfaseguros. Reservar uma mesa para quinta às 16h.",
+      "Boa tarde, sou a secretária da Alfaseguros. Reservar uma mesa para quinta às 16h.",
     );
 
     const venue = composeSpokenGreeting({
@@ -246,7 +264,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
       objective: "Reservar uma mesa.",
       now: LISBON_AFTERNOON,
     });
-    expect(venue).toBe("Olá, boa tarde. Ligo da secretária. Reservar uma mesa.");
+    expect(venue).toBe("Boa tarde, sou a secretária. Reservar uma mesa.");
     expect(venue).not.toMatch(/bem-vindo ao restaurante/i);
     expect(venue).not.toMatch(/em que posso ajudar/i);
   });
@@ -280,7 +298,7 @@ describe("composeSpokenGreeting call c2be0cd5 instruction dump", () => {
       now: LISBON_AFTERNOON,
     });
     expect(spoken).toBe(
-      "Olá, boa tarde. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+      "Boa tarde, sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
     );
     expect(spoken).not.toMatch(/Fala português/i);
     expect(spoken).not.toMatch(/brasileiroismos/i);
@@ -304,7 +322,7 @@ describe("composeSpokenGreeting call c2be0cd5 instruction dump", () => {
       now: LISBON_EVENING,
     });
     expect(spoken).toBe(
-      "Olá, boa noite. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+      "Boa noite, sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
     );
     expect(spoken).not.toMatch(/Fala português/i);
     expect(spoken).not.toMatch(/Tu LIGAS/i);

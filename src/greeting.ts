@@ -60,10 +60,10 @@ export function timeOfDayGreeting(
 export function defaultCallerIdentity(language: Language): string {
   switch (language) {
     case "pt-PT":
-      return "Ligo da secretária.";
+      return "sou a secretária";
     case "en-GB":
     case "en-US":
-      return "I'm calling from the secretary.";
+      return "this is the secretary";
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -86,9 +86,10 @@ export function looksLikeVenueWelcome(text: string): boolean {
 }
 
 /**
- * Spoken force_message text only: Olá/Hello + time-of-day + one short caller identity
- * clause + a short natural ask. Never dumps ROLEPLAY, system instructions, markdown,
- * or the raw objective. Never greets as the restaurant («bem-vindo ao restaurante»).
+ * Spoken force_message text only: Lisbon time-of-day (`Bom dia` / `Boa tarde` /
+ * `Boa noite`) + «sou a/o [persona]» + a short natural ask. Never dumps ROLEPLAY,
+ * system instructions, markdown, or the raw objective. Never greets as the
+ * restaurant («bem-vindo ao restaurante»). Never invents a different opening.
  */
 export function composeSpokenGreeting(input: {
   language: Language;
@@ -102,8 +103,6 @@ export function composeSpokenGreeting(input: {
   const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
   const timeGreeting = timeOfDayGreeting(input.language, timezone, now);
-  const hello = helloWord(input.language);
-  const opening = `${hello}, ${lowerFirst(timeGreeting)}.`;
   const identitySource = identitySourceText(input);
   const persona = spokenIdentity(input.language, identitySource);
   const ask = spokenAskFromObjective({
@@ -115,17 +114,16 @@ export function composeSpokenGreeting(input: {
 
   let spoken: string;
   if (!persona) {
-    spoken = opening;
+    spoken = ensureSentence(timeGreeting);
   } else {
-    const hasTime = TIME_PHRASE.test(persona);
-    const hasHello = LEADING_HELLO.test(persona);
-    if (hasTime && hasHello) {
-      spoken = ensureSentence(persona);
-    } else if (hasTime && !hasHello) {
-      spoken = ensureSentence(`${hello}, ${lowerFirst(persona)}`);
+    const withoutHello = stripLeadingHello(persona);
+    if (TIME_PHRASE.test(withoutHello)) {
+      spoken = ensureSentence(capitalizeFirst(withoutHello));
     } else {
-      const rest = stripLeadingTime(stripLeadingHello(persona));
-      spoken = rest ? joinUtterances(opening, ensureSentence(capitalizeFirst(rest))) : opening;
+      const rest = stripLeadingTime(withoutHello);
+      spoken = rest
+        ? ensureSentence(`${timeGreeting}, ${lowerFirst(rest.replace(/[.!?…]+$/u, ""))}`)
+        : ensureSentence(timeGreeting);
     }
   }
 
@@ -159,20 +157,54 @@ function spokenIdentity(language: Language, raw: string): string {
   const cleaned = sanitizePersona(raw);
   if (!cleaned || looksLikeVenueWelcome(cleaned)) return defaultCallerIdentity(language);
   const clause = stripLeadingTime(stripLeadingHello(cleaned)) || cleaned;
-  if (IDENTITY_ALREADY_SPOKEN.test(clause)) return clause;
   switch (language) {
-    case "pt-PT": {
-      const rest = /^[ao]s?\s+/i.test(cleaned) ? cleaned : `a ${lowerFirst(cleaned)}`;
-      return `Fala ${rest}`;
-    }
+    case "pt-PT":
+      return portugueseCallerIdentity(clause);
     case "en-GB":
     case "en-US":
-      return `I'm calling from ${lowerFirst(cleaned)}`;
+      if (IDENTITY_ALREADY_SPOKEN.test(clause)) return clause;
+      return `I'm calling from ${lowerFirst(clause)}`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
     }
   }
+}
+
+/** «sou a/o [name]» — feminine default (Benedita). Never «Fala a …». */
+function portugueseCallerIdentity(clause: string): string {
+  const t = clause.replace(/[.!?…]+$/u, "").trim();
+  if (!t) return defaultCallerIdentity("pt-PT");
+  const sou = t.match(/^sou\s+([ao]s?)\s+(.+)$/i);
+  if (sou?.[1] && sou[2]) return `sou ${sou[1].toLocaleLowerCase("pt-PT")} ${sou[2].trim()}`;
+  const fala = t.match(/^(?:fala|falo)\s+([ao]s?)\s+(.+)$/i);
+  if (fala?.[1] && fala[2]) return `sou ${fala[1].toLocaleLowerCase("pt-PT")} ${fala[2].trim()}`;
+  const ligoDa = t.match(/^ligo da\s+(.+)$/i);
+  if (ligoDa?.[1]) {
+    const name = ligoDa[1].trim();
+    return `sou ${portuguesePersonalArticle(name)} ${lowerFirst(name)}`;
+  }
+  if (/^sou\b/i.test(t)) return lowerFirst(t);
+  const article = portuguesePersonalArticle(t);
+  const rest = t.replace(/^[ao]s?\s+/i, "");
+  return `sou ${article} ${lowerFirst(rest)}`;
+}
+
+function portuguesePersonalArticle(name: string): "a" | "o" {
+  const raw = name.trim();
+  const leading = raw.match(/^([ao]s?)\b/i);
+  if (leading?.[1]) {
+    const w = stripDiacritics(leading[1]).toLowerCase();
+    if (w === "o" || w === "os") return "o";
+    return "a";
+  }
+  const first = stripDiacritics(raw.split(/\s+/)[0] ?? "").toLowerCase();
+  if (/^(nuno|joao|carlos|pedro|miguel|antonio|rui|secretario)$/.test(first)) return "o";
+  if (/o$/.test(first) && !/a$/.test(first) && /(ario|ino|uno|elo)$/.test(first)) return "o";
+  if (/o$/.test(first) && !/(secretaria|maria|patricia|andrea|ana)$/.test(first) && first.length <= 6) {
+    return "o";
+  }
+  return "a";
 }
 
 export function spokenAskFromObjective(input: {
@@ -230,20 +262,6 @@ export function looksLikeInstructionDump(text: string): boolean {
     if (looksLikeSystemRule(sentence)) return true;
   }
   return false;
-}
-
-function helloWord(language: Language): string {
-  switch (language) {
-    case "pt-PT":
-      return "Olá";
-    case "en-GB":
-    case "en-US":
-      return "Hello";
-    default: {
-      const _never: never = language;
-      throw new Error(`unsupported language: ${_never}`);
-    }
-  }
 }
 
 function hourInTimeZone(now: Date, timeZone: string): number {

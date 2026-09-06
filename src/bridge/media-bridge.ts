@@ -1,5 +1,6 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
 import type { ElevenLabsTts } from "../elevenlabs.js";
+import { stripElevenLabsAudioTags } from "../el-v3-tags.js";
 import {
   fillPcmuFrameBuffer,
   GreetingAudioCache,
@@ -265,9 +266,9 @@ export class MediaBridge {
     if (wasWaiting) this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     this.queueScriptedGreeting();
-    // Keep create_response false while the scripted greeting plays so the model
-    // cannot immediately re-introduce itself. Instructions switch to "already delivered".
-    this.configureGrokSession();
+    // Do not session.update here. A second update on unlock interrupts the warm
+    // force_message audio and makes Grok think again before first Telnyx media.
+    // create_response stays false until maybeFinishGreetingPlayback after frames play.
   }
 
   onTelnyxMessage(message: JsonObject): void {
@@ -496,8 +497,12 @@ export class MediaBridge {
       (this.greetingResponseId && responseId === this.greetingResponseId) ||
       (this.greetingForceSent && !this.grokGreetingComplete && (!responseId || !this.greetingResponseId));
     if (greetingResponse) {
-      this.grokGreetingComplete = true;
-      if (!this.wantsElevenLabsPlayback()) this.grokGreetingBuffer.finish(false);
+      if (this.wantsElevenLabsPlayback()) {
+        this.grokGreetingComplete = true;
+      } else if (this.grokGreetingBuffer.frames.length > 0) {
+        this.grokGreetingComplete = true;
+        this.grokGreetingBuffer.finish(false);
+      }
     }
     this.grokResponsePending = false;
     if (this.wantsElevenLabsPlayback()) {
@@ -523,6 +528,11 @@ export class MediaBridge {
       this.flushResponseDoneWaiters();
     }
     if (!this.greetingPlaying) return;
+    // Empty Grok greeting audio must not flip create_response (that caused a
+    // second model think and a mute first turn). EL audio is a separate cache.
+    if (!this.wantsElevenLabsPlayback() && this.grokGreetingBuffer.frames.length === 0) {
+      return;
+    }
     this.greetingGrokDone = true;
     this.maybeFinishGreetingPlayback();
   }
@@ -1083,9 +1093,10 @@ export class MediaBridge {
   }
 
   private pushTranscript(line: TranscriptLine): void {
+    const text = line.role === "assistant" ? stripElevenLabsAudioTags(line.text) : line.text;
     const last = this.call.transcript[this.call.transcript.length - 1];
-    if (last && last.role === line.role && last.text === line.text) return;
-    this.call.transcript.push(line);
+    if (last && last.role === line.role && last.text === text) return;
+    this.call.transcript.push({ role: line.role, text });
   }
 }
 

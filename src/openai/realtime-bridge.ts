@@ -208,7 +208,7 @@ export class OpenAIMediaBridge {
     this.suppressAssistantAudio = false;
     if (!this.greetingRequested) this.requestGreetingAudio();
     this.flushGreetingIfReady();
-    if (this.greetingDone) this.maybeFinishGreetingPlayback();
+    // create_response stays off until flushGreetingIfReady actually sent frames.
   }
 
   onTelnyxMessage(message: JsonObject): void {
