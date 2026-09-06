@@ -126,6 +126,18 @@ describe("composeSpokenGreeting", () => {
     );
   });
 
+  it("replaces a stale boa tarde in the persona with Lisbon Boa noite", () => {
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        persona: "secretária da Alfaseguros",
+        greeting: "Olá, boa tarde. Fala a secretária da Alfaseguros.",
+        objective: "Queria marcar um jantar.",
+        now: LISBON_EVENING,
+      }),
+    ).toBe("Boa noite, sou a secretária da Alfaseguros. Queria marcar um jantar.");
+  });
+
   it("prepends Lisbon time when a custom greeting has persona but no time-of-day", () => {
     expect(
       composeSpokenGreeting({

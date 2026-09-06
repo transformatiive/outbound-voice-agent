@@ -47,7 +47,9 @@ describe("prompt / language", () => {
     expect(text).toMatch(/zero brasileiroismos/i);
     expect(text).toMatch(/sou a\/o/);
     expect(text).toMatch(/NUNCA falas pelos dois lados/);
-    expect(text).toContain("Confirmar a marcação de quinta às 16h");
+    expect(text).toMatch(/sotaque padrão de Lisboa/i);
+    expect(text).toMatch(/sotaque.*Brasil|fonética.*Brasil/i);
+    expect(text).toMatch(/não a substituas|não a reescrevas/i);
     expect(text).toMatch(/end_call/);
     expect(text).not.toMatch(/British English/i);
     expect(text).not.toMatch(/American English/i);

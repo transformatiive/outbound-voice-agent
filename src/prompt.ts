@@ -321,8 +321,8 @@ A sessão está bloqueada em pt-PT. Nunca «pt», nunca «pt-BR». Mesmo que o i
 Pares OBRIGATÓRIO / PROIBIDO: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; desporto nunca esporte; utilizador nunca usuário; ficheiro nunca arquivo; comboio nunca trem; casa de banho nunca banheiro; contacto nunca contato; está a fazer nunca está fazendo; registei nunca registrei; nós nunca «a gente».
 Tratamento: 3.ª pessoa europeia («pode dizer-me», «o seu»). NUNCA «você», NUNCA «ocê», NUNCA «cê», NUNCA «tu», NUNCA «o senhor» / «a senhora», NUNCA «tá», «né», «beleza», «legal», «combinado» brasileiro.
 PROIBIDO cumprimentos brasileiros: «Oi», «Oi, tudo bem?», «Tudo bem?», «Tudo bom?», «Seja bem-vindo», «Bem-vindo», «Bem-vinda», «Bem-vindos», «Beleza», «Falou», «Valeu», «E aí».
-A primeira fala já é «Bom dia» / «Boa tarde» / «Boa noite» + «sou a/o …» — não a substituas por «Oi» nem por um fluxo inventado.
-NUNCA «bem-vindo ao restaurante». Sotaque padrão de Lisboa. Ritmo de conversa telefónica viva, não robótica.`;
+A primeira fala já é «Bom dia» / «Boa tarde» / «Boa noite» + «sou a/o …» (hora de Europe/Lisbon) — não a substituas, não a parafraseies, não a reescrevas, não comeces por «Oi» nem por «Olá».
+NUNCA «bem-vindo ao restaurante». Sotaque padrão de Lisboa — NUNCA sotaque, fonética ou ritmo do Brasil, mesmo que a voz do modelo soe brasileira. Ritmo de conversa telefónica viva, não robótica.`;
     case "en-GB":
       return `# Language (en-GB — highest priority)
 Speak natural British English for the entire call: vocabulary, spelling if you must spell, and accent (UK).

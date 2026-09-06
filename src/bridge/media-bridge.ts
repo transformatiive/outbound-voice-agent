@@ -1048,17 +1048,18 @@ export class MediaBridge {
   private maybeUnlockAfterGrace(event: string): void {
     if (!this.isWaitingForCalleeSpeech()) return;
     const atMs = this.clockMs();
+    const elapsed = msSinceStreamStart(this.calleeGate, atMs);
+    if (elapsed === undefined || elapsed < this.calleeSpeechConfig.graceMs) return;
     if (hasPendingPostGraceUnlock(this.calleeGate)) {
-      const elapsed = msSinceStreamStart(this.calleeGate, atMs);
-      if (elapsed !== undefined && elapsed >= this.calleeSpeechConfig.graceMs) {
-        const decision = onPostGraceCheck(this.calleeGate, true, atMs, this.calleeSpeechConfig);
-        this.logCalleeGate(decision, event);
-        if (decision.unlock) this.speakGreeting();
-        return;
-      }
+      const decision = onPostGraceCheck(this.calleeGate, true, atMs, this.calleeSpeechConfig);
+      this.logCalleeGate(decision, event);
+      if (decision.unlock) this.speakGreeting();
+      return;
     }
-    if (this.calleeGate.acceptedSpeechStartedAtMs === undefined) return;
-    if (atMs - this.calleeGate.acceptedSpeechStartedAtMs < this.calleeSpeechConfig.minSpeechMs) {
+    if (
+      this.calleeGate.lastSpeechStartedAtMs === undefined &&
+      this.calleeGate.acceptedSpeechStartedAtMs === undefined
+    ) {
       return;
     }
     const decision = onOngoingSpeechCheck(this.calleeGate, true, atMs, this.calleeSpeechConfig);

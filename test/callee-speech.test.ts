@@ -85,11 +85,11 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(atGraceEdge.unlock).toBe(false);
   });
 
-  it("does not unlock on speech_started alone after grace — waits for min duration or transcript", () => {
+  it("unlocks immediately on post-grace speech_started — no awaiting_min_duration stall", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
     const started = onSpeechStarted(gate, true, config.graceMs, config);
-    expect(started).toEqual({ unlock: false, reason: "awaiting_min_duration" });
+    expect(started).toEqual({ unlock: true, reason: "short_answer" });
     expect(gate.acceptedSpeechStartedAtMs).toBe(config.graceMs);
   });
 
@@ -221,24 +221,20 @@ describe("callee speech gate (waitForCallee)", () => {
   it("unlocks a post-grace short answer after min speech without waiting for ASR", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    onSpeechStarted(gate, true, 600, config);
-    expect(onOngoingSpeechCheck(gate, true, 650, config)).toEqual({
-      unlock: false,
-      reason: "awaiting_min_duration",
-    });
-    expect(onOngoingSpeechCheck(gate, true, 680, config)).toEqual({
-      unlock: true,
-      reason: "short_answer",
-    });
+    expect(onSpeechStarted(gate, true, 600, config)).toEqual({ unlock: true, reason: "short_answer" });
   });
 
-  it("does not short-answer-unlock speech that started during grace", () => {
+  it("unlocks overlapping in-grace «estou» as soon as grace ends without waiting for speech_stopped", () => {
     const gate = createCalleeSpeechGate();
     noteStreamStart(gate, 0);
-    onSpeechStarted(gate, true, 200, config);
-    expect(onOngoingSpeechCheck(gate, true, 700, config)).toEqual({
+    expect(onSpeechStarted(gate, true, 200, config)).toEqual({ unlock: false, reason: "grace_period" });
+    expect(onOngoingSpeechCheck(gate, true, 300, config)).toEqual({
       unlock: false,
-      reason: "no_accepted_utterance",
+      reason: "grace_period",
+    });
+    expect(onOngoingSpeechCheck(gate, true, config.graceMs, config)).toEqual({
+      unlock: true,
+      reason: "short_answer",
     });
   });
 });

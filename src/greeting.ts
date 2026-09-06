@@ -4,8 +4,6 @@ export const DEFAULT_TIMEZONE = "Europe/Lisbon";
 export const MAX_SPOKEN_ASK_CHARS = 140;
 export const MAX_IDENTITY_CHARS = 90;
 
-const TIME_PHRASE =
-  /\b(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\b/i;
 const LEADING_HELLO = /^(olá|ola|hello)\s*[,.]?\s*/i;
 const LEADING_TIME =
   /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\s*[,.]?\s*/i;
@@ -112,20 +110,12 @@ export function composeSpokenGreeting(input: {
     fallbackText: identitySource,
   });
 
-  let spoken: string;
-  if (!persona) {
-    spoken = ensureSentence(timeGreeting);
-  } else {
-    const withoutHello = stripLeadingHello(persona);
-    if (TIME_PHRASE.test(withoutHello)) {
-      spoken = ensureSentence(capitalizeFirst(withoutHello));
-    } else {
-      const rest = stripLeadingTime(withoutHello);
-      spoken = rest
-        ? ensureSentence(`${timeGreeting}, ${lowerFirst(rest.replace(/[.!?…]+$/u, ""))}`)
-        : ensureSentence(timeGreeting);
-    }
-  }
+  // Always the Lisbon (or requested-zone) clock + identity. Never keep a stale
+  // «boa tarde» from the persona when it is already «Boa noite» locally.
+  const identityOnly = stripLeadingTime(stripLeadingHello(persona)).replace(/[.!?…]+$/u, "").trim();
+  let spoken = identityOnly
+    ? ensureSentence(`${timeGreeting}, ${lowerFirst(identityOnly)}`)
+    : ensureSentence(timeGreeting);
 
   if (ask && !containsPurpose(spoken, ask)) {
     spoken = joinUtterances(spoken, ask);

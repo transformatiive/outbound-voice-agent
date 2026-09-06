@@ -414,7 +414,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     spyLog2.mockRestore();
   });
 
-  it("unlocks waitForCallee on a short post-grace answer via media without waiting for ASR", async () => {
+  it("unlocks waitForCallee immediately on post-grace speech_started without a min-duration stall", async () => {
     const clock = { ms: 0 };
     const logs: string[] = [];
     const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
@@ -429,25 +429,50 @@ describe("media bridge Telnyx ↔ Grok", () => {
       clockMs: () => clock.ms,
     });
     bridge.onTelnyxMessage({ event: "start" });
-    clock.ms = 600;
+    clock.ms = 400;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(
+      logs.some((line) =>
+        /unlock via short_answer \(speech_started\).*400ms since stream start/.test(line),
+      ),
+    ).toBe(true);
+    expect(logs.some((line) => /awaiting_min_duration/.test(line))).toBe(false);
+    spyLog.mockRestore();
+  });
+
+  it("unlocks overlapping in-grace speech on the first post-grace media frame", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 200;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(forceMessageCount(grokSend)).toBe(0);
+    expect(logs.some((line) => /greeting blocked \(grace_period\) on speech_started/.test(line))).toBe(
+      true,
+    );
 
-    clock.ms = 650;
-    bridge.onTelnyxMessage({
-      event: "media",
-      media: { track: "inbound", payload: "QUJDRA==" },
-    });
-    expect(forceMessageCount(grokSend)).toBe(0);
-
-    clock.ms = 680;
+    clock.ms = DEFAULT_CALLEE_SPEECH_GRACE_MS;
     bridge.onTelnyxMessage({
       event: "media",
       media: { track: "inbound", payload: "QUJDRA==" },
     });
     expect(forceMessageCount(grokSend)).toBe(1);
     expect(
-      logs.some((line) => /unlock via short_answer \(media\).*680ms since stream start/.test(line)),
+      logs.some((line) =>
+        /unlock via short_answer \(media\).*350ms since stream start/.test(line),
+      ),
     ).toBe(true);
     spyLog.mockRestore();
   });
