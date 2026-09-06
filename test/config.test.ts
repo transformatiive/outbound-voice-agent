@@ -5,7 +5,10 @@ import {
   DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
   DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
   DEFAULT_ELEVENLABS_VOICE_ID,
+  RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+  RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
   elevenLabsAudioPathActive,
+  elevenLabsModelSupportsAudioTags,
   elevenLabsModelSupportsOptimizeStreamingLatency,
   openaiAudioPathActive,
 } from "../src/tts.js";
@@ -38,6 +41,7 @@ describe("config", () => {
     expect(cfg.elevenlabs).toEqual({
       apiKey: "",
       voiceId: DEFAULT_ELEVENLABS_VOICE_ID,
+      voiceIdAlt: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
       model: DEFAULT_ELEVENLABS_MODEL,
       configured: false,
       optimizeStreamingLatency: DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
@@ -55,11 +59,21 @@ describe("config", () => {
     expect(cfg.ready.openai).toBe(false);
     expect(openaiAudioPathActive(cfg.openai)).toBe(false);
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezTenCDRKHkWiX");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).toContain("Ten");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).not.toContain("TnC");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).not.toBe("NkpT2jezTnCDRKHkWiX");
+    expect(DEFAULT_ELEVENLABS_VOICE_ID).not.toMatch(/Ln/);
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toHaveLength(20);
+    expect(RECOMMENDED_ELEVENLABS_VOICE_ID_ALT).toBe("nJ5NFqyKb8kn9JBPmo6i");
+    expect(RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME).toBe("Joana");
     expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
     expect(DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY).toBe(3);
     expect(DEFAULT_ELEVENLABS_VAD_SILENCE_MS).toBe(130);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3_conversational")).toBe(false);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v3")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v3_conversational")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_flash_v2_5")).toBe(false);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_flash_v2_5")).toBe(true);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_turbo_v2_5")).toBe(true);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("multilingual_v2")).toBe(true);
@@ -134,6 +148,7 @@ describe("config", () => {
     expect(withKey.ready.elevenlabs).toBe(true);
     expect(elevenLabsAudioPathActive(withKey.elevenlabs)).toBe(true);
     expect(withKey.elevenlabs.voiceId).toBe(DEFAULT_ELEVENLABS_VOICE_ID);
+    expect(withKey.elevenlabs.voiceIdAlt).toBe(RECOMMENDED_ELEVENLABS_VOICE_ID_ALT);
     expect(withKey.elevenlabs.model).toBe(DEFAULT_ELEVENLABS_MODEL);
     expect(withKey.grokVoice).toBe("ara");
     expect(withKey.grokVoiceSpeed).toBe(1.05);
@@ -150,6 +165,7 @@ describe("config", () => {
     expect(overridden.elevenlabs).toEqual({
       apiKey: "el-key",
       voiceId: "el-voice",
+      voiceIdAlt: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
       model: "multilingual_v2",
       configured: true,
       optimizeStreamingLatency: DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
@@ -157,6 +173,20 @@ describe("config", () => {
     expect(overridden.ready.elevenlabs).toBe(true);
     expect(overridden.grokVoice).toBe("ara");
     expect(overridden.grokVoiceSpeed).toBe(1.05);
+
+    const altVoice = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+      ELEVENLABS_API_KEY: "el-key",
+      ELEVENLABS_VOICE_ID_ALT: "custom-alt-voice",
+      ELEVENLABS_MODEL: "eleven_v3_conversational",
+    });
+    expect(altVoice.elevenlabs.voiceId).toBe(DEFAULT_ELEVENLABS_VOICE_ID);
+    expect(altVoice.elevenlabs.voiceIdAlt).toBe("custom-alt-voice");
+    expect(altVoice.elevenlabs.model).toBe("eleven_v3_conversational");
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency(altVoice.elevenlabs.model)).toBe(false);
 
     const elLatency = loadConfig({
       API_KEY: "k",

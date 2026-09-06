@@ -43,7 +43,13 @@ describe("prompt / language", () => {
     expect(text).toMatch(/NUNCA és o restaurante/i);
     expect(text).toMatch(/caller_booking/);
     expect(text).toMatch(/venue_staff/);
-    expect(text).toContain("Confirmar a marcação de quinta às 16h");
+    expect(text).toMatch(/você/);
+    expect(text).toMatch(/zero brasileiroismos/i);
+    expect(text).toMatch(/sou a\/o/);
+    expect(text).toMatch(/NUNCA falas pelos dois lados/);
+    expect(text).toMatch(/sotaque padrão de Lisboa/i);
+    expect(text).toMatch(/sotaque.*Brasil|fonética.*Brasil/i);
+    expect(text).toMatch(/não a substituas|não a reescrevas/i);
     expect(text).toMatch(/end_call/);
     expect(text).not.toMatch(/British English/i);
     expect(text).not.toMatch(/American English/i);
@@ -196,6 +202,8 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/Não alongues o nome/);
     expect(pt).toMatch(/Hora local \(Europe\/Lisbon\)/);
     expect(pt).toMatch(/boa tarde/i);
+    expect(pt).toMatch(/sou a\/o/);
+    expect(pt).toMatch(/Não comeces por «Olá»/);
     expect(pt).toMatch(/tom plano|não plana|expressiva/i);
     expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
     assertNoSpokenBranding(pt);
@@ -213,6 +221,7 @@ describe("prompt / language", () => {
     expect(en).toMatch(/Do not linger on (the )?(name|title)/i);
     expect(en).toMatch(/Local time \(Europe\/Lisbon\)/);
     expect(en).toMatch(/good morning/i);
+    expect(en).toMatch(/Do not start with Hello/);
     expect(en).toMatch(/not flat|expressive/i);
     expect(en).toMatch(/Wait silently until the callee speaks/i);
     assertNoSpokenBranding(en);
@@ -269,8 +278,12 @@ describe("prompt / language", () => {
       objective: "ROLEPLAY: quem atende. Reservar mesa no restaurante.",
       waitForCallee: true,
     });
-    expect(pt).toMatch(/Foste tu a ligar/i);
+    expect(pt).toMatch(/Tu LIGASTE/i);
     expect(pt).toMatch(/NUNCA és o restaurante/i);
+    expect(pt).toMatch(/NUNCA falas pelos dois lados/);
+    expect(pt).toMatch(/sou a\/o/);
+    expect(pt).toMatch(/você/);
+    expect(pt).toMatch(/zero brasileiroismos/i);
     expect(pt).toMatch(/bem-vindo ao restaurante/i);
     expect(pt).toMatch(/fazer|confirmar|reserva|marcação/i);
     expect(pt).toMatch(/já estava marcado/i);

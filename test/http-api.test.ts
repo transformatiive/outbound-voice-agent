@@ -4,6 +4,10 @@ import { DEFAULT_TURN_DETECTION } from "../src/grok/session.js";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
 import type { TelnyxClient } from "../src/telnyx/client.js";
+import {
+  RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+  RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+} from "../src/tts.js";
 
 const config: AppConfig = {
   port: 0,
@@ -81,7 +85,17 @@ describe("HTTP API", () => {
     expect(res.body.tts).toEqual({
       default: "grok",
       grokVoice: "ara",
-      elevenlabs: { configured: false, audioPathActive: false, model: "eleven_v3", voiceId: "" },
+      elevenlabs: {
+        configured: false,
+        audioPathActive: false,
+        model: "eleven_v3",
+        voiceId: "",
+        voiceIdAlt: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+        recommendedVoiceAlt: {
+          id: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+          name: RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+        },
+      },
       openai: {
         configured: false,
         audioPathActive: false,
@@ -148,7 +162,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotUs.body.greeting).toMatch(
-      /^Hello, good (morning|afternoon|evening)\. I'm calling from the secretary\. Confirm Thursday at 4pm\.$/,
+      /^Good (morning|afternoon|evening), this is the secretary\. Confirm Thursday at 4pm\.$/,
     );
     expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
@@ -219,7 +233,7 @@ describe("HTTP API", () => {
     expect(got.status).toBe(200);
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
     expect(got.body.greeting).toMatch(
-      /^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária\. Confirmar a marcação de quinta às 16h\.$/,
+      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação de quinta às 16h\.$/,
     );
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
     expect(got.body.waitForCallee).toBe(false);
@@ -289,7 +303,7 @@ describe("HTTP API", () => {
     expect(telnyx.dial).toHaveBeenCalledTimes(3);
   });
 
-  it("composes Olá + time-of-day + purpose when greeting is omitted, including waitForCallee", async () => {
+  it("composes Lisbon time-of-day + sou a/o + purpose when greeting is omitted, including waitForCallee", async () => {
     const { app } = createApp({ config, telnyx });
     const omittedPt = await request(app)
       .post("/api/outbound")
@@ -304,7 +318,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${omittedPt.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotPt.body.greeting).toMatch(
-      /^Olá, (bom dia|boa tarde|boa noite)\. Ligo da secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação\.$/,
     );
     expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
 
@@ -323,7 +337,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${waitMissing.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotWait.body.greeting).toMatch(
-      /^Olá, (bom dia|boa tarde|boa noite)\. Ligo da secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação\.$/,
     );
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
@@ -346,7 +360,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     const got = await request(app)
       .get(`/api/calls/${res.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(got.body.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
+    expect(got.body.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite), sou a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
     expect(got.body.greeting).not.toMatch(/ROLEPLAY/i);
     expect(got.body.greeting).not.toMatch(/quem atende/i);
     expect(got.body.objective).toMatch(/ROLEPLAY/);
@@ -419,6 +433,11 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       audioPathActive: true,
       model: "eleven_v3",
       voiceId: "NkpT2jezTenCDRKHkWiX",
+      voiceIdAlt: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+      recommendedVoiceAlt: {
+        id: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+        name: RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+      },
     });
     expect(res.body.ready.elevenlabs).toBe(true);
     expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
@@ -466,7 +485,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("elevenlabs");
     expect(got.body.persona).toBe("secretária da empresa");
-    expect(got.body.greeting).toMatch(/Fala a secretária da empresa/);
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
     expect(got.body.voice).toBe("ara");
   });
@@ -506,7 +525,10 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     for (let i = 0; i < 20 && elCalls.length === 0; i++) await Promise.resolve();
     expect(elCalls.length).toBeGreaterThanOrEqual(1);
     expect(elCalls[0]?.url).toContain("NkpT2jezTenCDRKHkWiX");
+    expect(elCalls[0]?.url).not.toContain("NkpT2jezTnCDRKHkWiX");
     expect(elCalls[0]?.body).toContain(call.greeting);
+    expect(elCalls[0]?.body).toContain("[warmly]");
+    expect(call.greeting).not.toContain("[warmly]");
     expect(telnyx.dial).toHaveBeenCalledTimes(1);
   });
 
@@ -565,7 +587,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(elCall.body.greeting).toBe(grokCall.body.greeting);
     expect(elCall.body.persona).toBe(grokCall.body.persona);
     expect(elCall.body.objective).toBe(grokCall.body.objective);
-    expect(elCall.body.greeting).toMatch(/Fala a secretária da empresa/);
+    expect(elCall.body.greeting).toMatch(/sou a secretária da empresa/);
 
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
     const grokDial = vi.mocked(telnyx.dial).mock.calls[0]?.[0];
@@ -685,7 +707,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("openai");
     expect(got.body.voice).toBe("marin");
-    expect(got.body.greeting).toMatch(/Fala a secretária da empresa/);
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 

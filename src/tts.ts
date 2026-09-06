@@ -3,8 +3,20 @@ export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
-/** Benedita. 20-char voice id (`Ten`, not `Ln`). Override with ELEVENLABS_VOICE_ID. */
+/**
+ * Benedita - PT-PT (Alfa teste). 20-char voice id.
+ * Letters **Ten** (not `Tn`, not `Ln`). Verified against the ElevenLabs API:
+ * `NkpT2jezTenCDRKHkWiX` returns the voice; `NkpT2jezTnCDRKHkWiX` is voice_not_found.
+ * Override the active voice with `ELEVENLABS_VOICE_ID`.
+ */
 export const DEFAULT_ELEVENLABS_VOICE_ID = "NkpT2jezTenCDRKHkWiX";
+/**
+ * A/B candidate: Joana — Natural and gentle, warm European Portuguese conversational
+ * feminine voice (`nJ5NFqyKb8kn9JBPmo6i`). Does not replace Benedita unless
+ * `ELEVENLABS_VOICE_ID` is set to this id. `ELEVENLABS_VOICE_ID_ALT` documents it.
+ */
+export const RECOMMENDED_ELEVENLABS_VOICE_ID_ALT = "nJ5NFqyKb8kn9JBPmo6i";
+export const RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME = "Joana";
 /** ElevenLabs stream URL `optimize_streaming_latency` (0–4). Used only on models that accept it. */
 export const DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY = 3;
 /** Shared server_vad end-of-turn silence for every TTS provider (Grok, ElevenLabs, OpenAI). */
@@ -19,6 +31,8 @@ export const DEFAULT_OPENAI_PREWARM_TIMEOUT_MS = 8000;
 export type ElevenLabsConfig = {
   apiKey: string;
   voiceId: string;
+  /** Documented A/B candidate (Joana). Not the live voice unless copied into voiceId. */
+  voiceIdAlt?: string;
   model: string;
   configured: boolean;
   optimizeStreamingLatency?: number;
@@ -54,24 +68,38 @@ export function parseTtsProvider(value: unknown): { ok: true; value: TtsProvider
 
 /**
  * `optimize_streaming_latency` is accepted on flash / turbo / multilingual_v2.
- * `eleven_v3` (the default) rejects it with HTTP 400 `unsupported_model`, which
- * emptied the greeting cache and left the callee muted on unlock.
+ * `eleven_v3` and `eleven_v3_conversational` reject it with HTTP 400
+ * `unsupported_model`, which emptied the greeting cache and muted unlock.
  */
 export function elevenLabsModelSupportsOptimizeStreamingLatency(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
+  if (elevenLabsModelIsV3(m)) return false;
   if (m.includes("flash") || m.includes("turbo")) return true;
   if (m.includes("multilingual_v2")) return true;
   return false;
 }
 
+/** `eleven_v3` and any `eleven_v3_*` (including `eleven_v3_conversational`). */
+export function elevenLabsModelIsV3(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  return m === "eleven_v3" || m.startsWith("eleven_v3_");
+}
+
+/** Audio tags are v3-only; flash/turbo would speak `[warmly]` as words. */
+export function elevenLabsModelSupportsAudioTags(model: string): boolean {
+  return elevenLabsModelIsV3(model);
+}
+
 export function elevenlabsConfigFromEnv(env: Record<string, string | undefined>): ElevenLabsConfig {
   const apiKey = env.ELEVENLABS_API_KEY?.trim() ?? "";
   const voiceId = env.ELEVENLABS_VOICE_ID?.trim() || DEFAULT_ELEVENLABS_VOICE_ID;
+  const voiceIdAlt = env.ELEVENLABS_VOICE_ID_ALT?.trim() || RECOMMENDED_ELEVENLABS_VOICE_ID_ALT;
   const model = env.ELEVENLABS_MODEL?.trim() || DEFAULT_ELEVENLABS_MODEL;
   return {
     apiKey,
     voiceId,
+    voiceIdAlt,
     model,
     configured: Boolean(apiKey),
     optimizeStreamingLatency: clampEnvInt(

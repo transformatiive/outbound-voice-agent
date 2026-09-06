@@ -1,6 +1,8 @@
 import type { Language } from "./prompt.js";
+import { tagElevenLabsSpeech } from "./el-v3-tags.js";
 import {
   DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
+  elevenLabsModelSupportsAudioTags,
   elevenLabsModelSupportsOptimizeStreamingLatency,
   type ElevenLabsConfig,
 } from "./tts.js";
@@ -154,8 +156,11 @@ export async function* streamElevenLabsPcmu(opts: {
   onHttpStart?: () => void;
   onFirstByte?: () => void;
 }): AsyncGenerator<string, void, unknown> {
-  const text = opts.text.trim();
-  if (!text) return;
+  const raw = opts.text.trim();
+  if (!raw) return;
+  const text = elevenLabsModelSupportsAudioTags(opts.config.model)
+    ? tagElevenLabsSpeech(raw)
+    : raw;
   const fetchImpl = opts.fetchImpl ?? fetch;
   opts.onHttpStart?.();
   const { response, format } = await requestElevenLabsAudio({

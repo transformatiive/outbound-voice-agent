@@ -14,7 +14,13 @@ import {
 import { placeOutboundCall } from "./outbound.js";
 import { LANGUAGES } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
-import { DEFAULT_TTS_PROVIDER, elevenLabsAudioPathActive, openaiAudioPathActive } from "./tts.js";
+import {
+  DEFAULT_TTS_PROVIDER,
+  RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+  RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+  elevenLabsAudioPathActive,
+  openaiAudioPathActive,
+} from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
 import {
@@ -110,6 +116,11 @@ export function createApp(deps: AppDeps): CreatedApp {
           audioPathActive: elevenLabsAudioPathActive(deps.config.elevenlabs),
           model: deps.config.elevenlabs.model,
           voiceId: deps.config.elevenlabs.voiceId,
+          voiceIdAlt: deps.config.elevenlabs.voiceIdAlt ?? RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+          recommendedVoiceAlt: {
+            id: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
+            name: RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
+          },
         },
         openai: {
           configured: deps.config.openai.configured,

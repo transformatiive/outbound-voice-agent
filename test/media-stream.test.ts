@@ -268,7 +268,7 @@ describe("media stream websocket", () => {
         type: "output_text",
         text: call.greeting,
       });
-      expect(call.greeting).toMatch(/^Olá, (bom dia|boa tarde|boa noite)\. Fala a secretária\. Confirmar quinta\.$/);
+      expect(call.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar quinta\.$/);
       const greetingMedia = await waitFor(telnyxFromGrok, (m) => m.event === "media");
       expect(greetingMedia).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
       expect(grokFromApp.filter((m) => m.type === "conversation.item.create")).toHaveLength(1);

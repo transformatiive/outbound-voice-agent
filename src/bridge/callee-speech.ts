@@ -18,7 +18,6 @@ export type CalleeSpeechBlockReason =
   | "not_waiting"
   | "grace_period"
   | "empty_transcript"
-  | "awaiting_min_duration"
   | "speech_too_short"
   | "no_accepted_utterance";
 
@@ -120,15 +119,21 @@ export function onSpeechStarted(
   if (!waiting) return { unlock: false, reason: "not_waiting" };
   gate.lastSpeechStartedAtMs = atMs;
   if (inGrace(gate, atMs, config.graceMs)) {
-    gate.acceptedSpeechStartedAtMs = undefined;
+    // Keep lastSpeechStartedAtMs so an overlapping «estou» unlocks as soon as
+    // grace ends (media / speech_stopped). Do not accept yet — ringback.
     return { unlock: false, reason: "grace_period" };
   }
   if (gate.pendingPostGraceUnlock) {
     gate.pendingPostGraceUnlock = false;
+    gate.acceptedSpeechStartedAtMs = undefined;
+    gate.lastSpeechStartedAtMs = undefined;
     return { unlock: true, reason: "grace_elapsed" };
   }
+  // After grace, first VAD speech_started is the callee picking up.
+  // Do not stall on awaiting_min_duration / inbound media frames (call 5fac53d9).
   gate.acceptedSpeechStartedAtMs = atMs;
-  return { unlock: false, reason: "awaiting_min_duration" };
+  gate.pendingPostGraceUnlock = false;
+  return { unlock: true, reason: "short_answer" };
 }
 
 export function onSpeechStopped(
@@ -170,8 +175,9 @@ export function onTranscript(waiting: boolean, text: string): CalleeSpeechDecisi
 }
 
 /**
- * After grace, a word-length burst of speech is enough to greet — do not wait
- * for speech_stopped or a slow ASR transcript («Still?» for «estou»).
+ * After grace, any in-progress callee speech is enough to greet — including
+ * «estou» that started during grace and is still going. Do not wait for
+ * speech_stopped, min duration, or a slow ASR transcript.
  */
 export function onOngoingSpeechCheck(
   gate: CalleeSpeechGate,
@@ -181,9 +187,15 @@ export function onOngoingSpeechCheck(
 ): CalleeSpeechDecision {
   if (!waiting) return { unlock: false, reason: "not_waiting" };
   if (inGrace(gate, atMs, config.graceMs)) return { unlock: false, reason: "grace_period" };
-  const started = gate.acceptedSpeechStartedAtMs;
-  if (started === undefined) return { unlock: false, reason: "no_accepted_utterance" };
-  if (atMs - started < config.minSpeechMs) return { unlock: false, reason: "awaiting_min_duration" };
+  if (gate.pendingPostGraceUnlock) {
+    gate.pendingPostGraceUnlock = false;
+    gate.acceptedSpeechStartedAtMs = undefined;
+    gate.lastSpeechStartedAtMs = undefined;
+    return { unlock: true, reason: "grace_elapsed" };
+  }
+  const inProgress =
+    gate.lastSpeechStartedAtMs !== undefined || gate.acceptedSpeechStartedAtMs !== undefined;
+  if (!inProgress) return { unlock: false, reason: "no_accepted_utterance" };
   gate.acceptedSpeechStartedAtMs = undefined;
   gate.lastSpeechStartedAtMs = undefined;
   gate.pendingPostGraceUnlock = false;

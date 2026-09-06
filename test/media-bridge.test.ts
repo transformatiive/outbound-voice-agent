@@ -414,7 +414,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     spyLog2.mockRestore();
   });
 
-  it("unlocks waitForCallee on a short post-grace answer via media without waiting for ASR", async () => {
+  it("unlocks waitForCallee immediately on post-grace speech_started without a min-duration stall", async () => {
     const clock = { ms: 0 };
     const logs: string[] = [];
     const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
@@ -429,25 +429,50 @@ describe("media bridge Telnyx ↔ Grok", () => {
       clockMs: () => clock.ms,
     });
     bridge.onTelnyxMessage({ event: "start" });
-    clock.ms = 600;
+    clock.ms = 400;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(forceMessageCount(grokSend)).toBe(1);
+    expect(
+      logs.some((line) =>
+        /unlock via short_answer \(speech_started\).*400ms since stream start/.test(line),
+      ),
+    ).toBe(true);
+    expect(logs.some((line) => /awaiting_min_duration/.test(line))).toBe(false);
+    spyLog.mockRestore();
+  });
+
+  it("unlocks overlapping in-grace speech on the first post-grace media frame", async () => {
+    const clock = { ms: 0 };
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 200;
     await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
     expect(forceMessageCount(grokSend)).toBe(0);
+    expect(logs.some((line) => /greeting blocked \(grace_period\) on speech_started/.test(line))).toBe(
+      true,
+    );
 
-    clock.ms = 650;
-    bridge.onTelnyxMessage({
-      event: "media",
-      media: { track: "inbound", payload: "QUJDRA==" },
-    });
-    expect(forceMessageCount(grokSend)).toBe(0);
-
-    clock.ms = 680;
+    clock.ms = DEFAULT_CALLEE_SPEECH_GRACE_MS;
     bridge.onTelnyxMessage({
       event: "media",
       media: { track: "inbound", payload: "QUJDRA==" },
     });
     expect(forceMessageCount(grokSend)).toBe(1);
     expect(
-      logs.some((line) => /unlock via short_answer \(media\).*680ms since stream start/.test(line)),
+      logs.some((line) =>
+        /unlock via short_answer \(media\).*350ms since stream start/.test(line),
+      ),
     ).toBe(true);
     spyLog.mockRestore();
   });
@@ -617,6 +642,54 @@ describe("media bridge Telnyx ↔ Grok", () => {
       { role: "user", text: "Estou" },
       { role: "assistant", text: "Olá, fala a secretária." },
     ]);
+  });
+
+  it("plays a warm Grok greeting cache on unlock with no session.update before first Telnyx media", async () => {
+    const order: string[] = [];
+    const grokSend = vi.fn((msg: { type?: string }) => {
+      order.push(`grok:${String(msg.type)}`);
+    });
+    const telnyxSend = vi.fn((msg: { event?: string }) => {
+      order.push(`telnyx:${String(msg.event)}`);
+    });
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    expect(order.filter((e) => e === "grok:session.update")).toHaveLength(1);
+
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.created", response_id: "greet-warm" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "WARMFRAME" });
+    await bridge.onGrokEvent({ type: "response.done", response_id: "greet-warm" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(responseCreateCount(grokSend)).toBe(0);
+
+    grokSend.mockClear();
+    telnyxSend.mockClear();
+    order.length = 0;
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Estou",
+    });
+    await flushMicrotasks();
+
+    expect(order[0]).not.toBe("grok:session.update");
+    expect(order.filter((e) => e === "telnyx:media" || e === "grok:session.update")).toEqual([
+      "telnyx:media",
+      "grok:session.update",
+    ]);
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "WARMFRAME" } });
+    expect(responseCreateCount(grokSend)).toBe(0);
+    expect(forceMessageCount(grokSend)).toBe(0);
+    const talkingUpdate = grokSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0] as {
+      session?: { turn_detection?: { create_response?: boolean } };
+    };
+    expect(talkingUpdate?.session?.turn_detection?.create_response).toBe(true);
   });
 
   it("does not speak on session.updated when waitForCallee is true", async () => {
