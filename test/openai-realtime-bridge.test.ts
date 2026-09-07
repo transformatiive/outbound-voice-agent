@@ -153,6 +153,41 @@ describe("OpenAI Realtime media bridge", () => {
     expect(call.endedReason).toBe("end_call");
   });
 
+  it("sends Telnyx DTMF on send_dtmf and does not hang up", async () => {
+    const hangup = vi.fn(async () => undefined);
+    const sendDtmf = vi.fn(async () => undefined);
+    const openaiSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = sampleCall();
+    const bridge = new OpenAIMediaBridge({
+      call,
+      sendOpenAI: openaiSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup, sendDtmf },
+      hangupDelayMs: 0,
+    });
+    await bridge.onOpenAIEvent({
+      type: "response.function_call_arguments.done",
+      name: "send_dtmf",
+      call_id: "tool-dtmf",
+      arguments: JSON.stringify({ digits: "2" }),
+    });
+    expect(sendDtmf).toHaveBeenCalledWith("v2:control-id", "2");
+    expect(hangup).not.toHaveBeenCalled();
+    expect(call.endedReason).toBeUndefined();
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+    expect(openaiSend).toHaveBeenCalledWith({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "tool-dtmf",
+        output: JSON.stringify({ ok: true, digits: "2" }),
+      },
+    });
+    expect(openaiSend).toHaveBeenCalledWith({ type: "response.create" });
+  });
+
+
   it("enables create_response only after the scripted greeting has finished", async () => {
     const openaiSend = vi.fn();
     const telnyxSend = vi.fn();

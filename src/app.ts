@@ -213,7 +213,9 @@ export function createApp(deps: AppDeps): CreatedApp {
       ttsProvider: result.call.ttsProvider ?? DEFAULT_TTS_PROVIDER,
       botRole: result.call.botRole ?? DEFAULT_BOT_ROLE,
       calleeRole: result.call.calleeRole ?? DEFAULT_CALLEE_ROLE,
+      ivr: result.call.ivr === true,
       createdAt: result.call.createdAt,
+      ...(result.call.ttsProvider !== "openai" ? { grokVoice: result.call.voice } : {}),
     });
   });
 

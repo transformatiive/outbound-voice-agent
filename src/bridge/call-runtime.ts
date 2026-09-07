@@ -83,7 +83,7 @@ export class CallRuntime {
       sendGrok,
       sendTelnyx,
       telnyx: deps.telnyx,
-      voice: deps.config.grokVoice,
+      voice: deps.call.voice,
       turnDetection,
       outputSpeed: deps.config.grokVoiceSpeed,
       calleeSpeechGraceMs: deps.config.calleeSpeechGraceMs,

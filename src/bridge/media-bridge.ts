@@ -17,6 +17,7 @@ import {
   sessionUpdatePayload,
   type TurnDetectionSettings,
 } from "../grok/session.js";
+import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
@@ -130,6 +131,7 @@ export class MediaBridge {
     done: true,
   };
   private readonly responseDoneWaiters: Array<() => void> = [];
+  private readonly handledToolCalls = new Set<string>();
 
   constructor(opts: MediaBridgeOptions) {
     this.call = opts.call;
@@ -208,6 +210,7 @@ export class MediaBridge {
         ...(this.call.timezone ? { timezone: this.call.timezone } : {}),
         ...(this.call.botRole ? { botRole: this.call.botRole } : {}),
         ...(this.call.calleeRole ? { calleeRole: this.call.calleeRole } : {}),
+        ...(this.call.ivr ? { ivr: true } : {}),
         turnDetection: this.turnDetection,
         createResponse: autoRespond,
         includeIdleTimeout: autoRespond,
@@ -397,20 +400,31 @@ export class MediaBridge {
       }
       case "response.function_call_arguments.done":
       case "response.output_item.done": {
-        const name = String(event.name ?? (event.item as JsonObject | undefined)?.name ?? "");
-        if (name !== "end_call") return;
-        const callId = String(event.call_id ?? (event.item as JsonObject | undefined)?.call_id ?? "");
-        if (callId) {
-          this.sendGrok({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify({ ok: true }),
-            },
-          });
-        }
-        await this.requestHangup("end_call");
+        await handleRealtimeToolCall({
+          event,
+          alreadyHandled: this.handledToolCalls,
+          telnyx: this.telnyx,
+          callControlId: this.call.telnyx.callControlId,
+          callId: this.call.id,
+          sendOutput: (toolCallId, output) => {
+            this.sendGrok({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: toolCallId,
+                output,
+              },
+            });
+          },
+          onEndCall: () => this.requestHangup("end_call"),
+          onDtmfContinue: () => {
+            this.sendGrok({ type: "response.create" });
+          },
+          clearPlayback: () => {
+            this.sendTelnyx({ event: "clear" });
+            this.abortElevenLabsPlayback();
+          },
+        });
         return;
       }
       case "error":

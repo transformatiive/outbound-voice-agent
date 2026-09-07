@@ -64,6 +64,7 @@ export function buildSessionInstructions(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  ivr?: boolean;
   timezone?: string;
   timeGreeting?: string;
   now?: Date;
@@ -83,7 +84,7 @@ export function buildSessionInstructions(input: {
 
   return `${languageInstructions(input.language)}
 
-${roleAndFlow(input.language, waitForCallee, botRole, calleeRole)}
+${roleAndFlow(input.language, waitForCallee, botRole, calleeRole, input.ivr === true)}
 
 ${objectiveHeading(input.language)}
 ${input.objective}
@@ -96,6 +97,8 @@ ${localTimeSection(input.language, timezone, timeGreeting)}
 ${closingSection(input.language)}
 
 ${endCallHeading(input.language)}
+
+${sendDtmfSection(input.language, input.ivr === true)}
 ${extra}`.trim();
 }
 
@@ -104,6 +107,7 @@ function roleAndFlow(
   waitForCallee: boolean,
   botRole: string,
   calleeRole: string,
+  ivr: boolean,
 ): string {
   switch (language) {
     case "pt-PT":
@@ -115,7 +119,7 @@ function roleAndFlow(
 2. Depois de o destinatário falar, uma saudação é dita palavra por palavra exactamente uma vez. Não a repitas, não a parafraseies, não te voltes a apresentar.
 3. ${afterGreetingPt()} Uma pergunta ou uma confirmação de cada vez. Turnos curtos de telefone. Responde já. Responde no instante em que o destinatário acaba. Sem espera extra. Sem pausas longas. Cala-te a seguir a cada pergunta.
 4. Quando o objetivo estiver concluído, recusado ou claramente impossível: agradece só, calorosamente, e chama end_call. Sem recap.
-
+${ivrFlowPt(ivr)}
 ${tomEFactosPt()}`
         : `${papelPt(botRole, calleeRole)}
 
@@ -124,7 +128,7 @@ ${tomEFactosPt()}`
 2. ${afterGreetingPt()} Depois de o destinatário responder (ou de uma pausa breve se ficar em silêncio), continua o objetivo.
 3. Uma pergunta ou uma confirmação de cada vez. Turnos curtos de telefone. Responde já. Responde no instante em que o destinatário acaba. Sem espera extra. Sem pausas longas. Cala-te a seguir a cada pergunta.
 4. Quando o objetivo estiver concluído, recusado ou claramente impossível: agradece só, calorosamente, e chama end_call. Sem recap.
-
+${ivrFlowPt(ivr)}
 ${tomEFactosPt()}`;
     case "en-GB":
     case "en-US":
@@ -136,7 +140,7 @@ ${tomEFactosPt()}`;
 2. After the callee speaks, a scripted greeting is delivered verbatim exactly once. Do not repeat it, paraphrase it, or introduce yourself again.
 3. ${afterGreetingEn()} One question or one short confirmation at a time. Short phone turns. Reply immediately. Answer the instant the callee finishes speaking. No extra wait. No long pauses. Stop talking after each question.
 4. When the objective is complete, declined, or clearly impossible: thank them only (no recap), then call end_call.
-
+${ivrFlowEn(ivr)}
 ${toneAndFactsEn()}`
         : `${roleEn(botRole, calleeRole)}
 
@@ -145,7 +149,7 @@ ${toneAndFactsEn()}`
 2. ${afterGreetingEn()} After the callee responds (or after a brief pause if they stay silent), continue the objective.
 3. One question or one short confirmation at a time. Short phone turns. Reply immediately. Answer the instant the callee finishes speaking. No extra wait. No long pauses. Stop talking after each question.
 4. When the objective is complete, declined, or clearly impossible: thank them only (no recap), then call end_call.
-
+${ivrFlowEn(ivr)}
 ${toneAndFactsEn()}`;
     default: {
       const _never: never = language;
@@ -305,6 +309,40 @@ Diz só o agradecimento curto até ao fim — a frase completa, em voz alta. Sem
     case "en-US":
       return `# end_call
 Speak the full short thank-you out loud, to the end of the sentence — no recap. Only then call the \`end_call\` tool. NEVER cut the farewell mid-sentence. Do not keep the callee on the line after the objective is done.`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+function ivrFlowPt(ivr: boolean): string {
+  return ivr
+    ? `
+5. Esta chamada pode cair num IVR / menu automático. Se pedirem para premir teclas, chama \`send_dtmf\` — nunca ditas os números.
+`
+    : "";
+}
+
+function ivrFlowEn(ivr: boolean): string {
+  return ivr
+    ? `
+5. This call may hit an IVR / automated menu. If they ask you to press keys, call \`send_dtmf\` — never speak the numbers.
+`
+    : "";
+}
+
+function sendDtmfSection(language: Language, ivr: boolean): string {
+  switch (language) {
+    case "pt-PT":
+      return `# send_dtmf
+Se ouvires um menu automático / IVR a pedir teclas (0-9, *, #), chama a ferramenta \`send_dtmf\` com esses dígitos. NÃO ditas os números por extenso («um», «dois») nem os lês em voz alta. Depois de enviar, fica em silêncio e continua a escutar o próximo prompt. Não desligues.
+${ivr ? "Esta chamada é uma navegação IVR: usa send_dtmf sempre que o prompt pedir para premir teclas.\n" : ""}`;
+    case "en-GB":
+    case "en-US":
+      return `# send_dtmf
+If you hear an automated menu / IVR asking you to press keys (0-9, *, #), call the \`send_dtmf\` tool with those digits. Do NOT speak the numbers as words. After sending, stay silent and keep listening for the next prompt. Do not hang up.
+${ivr ? "This call is IVR navigation: use send_dtmf whenever the prompt asks you to press keys.\n" : ""}`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

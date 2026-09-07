@@ -1,4 +1,24 @@
+import { SEND_DTMF_TOOL } from "../dtmf.js";
 import { END_CALL_TOOL_DESCRIPTION, buildSessionInstructions, languageHint, type Language } from "../prompt.js";
+
+export const GROK_VOICES = ["ara", "eve", "rex", "sal", "leo"] as const;
+export type GrokVoice = (typeof GROK_VOICES)[number];
+export const DEFAULT_GROK_VOICE: GrokVoice = "ara";
+export const GROK_VOICE_LIST = GROK_VOICES.join(" | ");
+
+export function isGrokVoice(value: string): value is GrokVoice {
+  return (GROK_VOICES as readonly string[]).includes(value);
+}
+
+export function parseGrokVoice(value: unknown): { ok: true; value: GrokVoice } | { ok: false } {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true, value: DEFAULT_GROK_VOICE };
+  }
+  if (typeof value !== "string") return { ok: false };
+  const normalized = value.trim().toLowerCase();
+  if (!isGrokVoice(normalized)) return { ok: false };
+  return { ok: true, value: normalized };
+}
 
 export type GrokFunctionTool = {
   type: "function";
@@ -111,6 +131,7 @@ export function sessionUpdatePayload(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  ivr?: boolean;
   timezone?: string;
   timeGreeting?: string;
   turnDetection?: TurnDetectionSettings;
@@ -128,7 +149,18 @@ export function sessionUpdatePayload(input: {
     type: "session.update",
     session: {
       voice: input.voice,
-      instructions: buildSessionInstructions(input),
+      instructions: buildSessionInstructions({
+        language: input.language,
+        greeting: input.greeting,
+        objective: input.objective,
+        ...(input.extraInstructions !== undefined ? { extraInstructions: input.extraInstructions } : {}),
+        ...(input.waitForCallee ? { waitForCallee: true } : {}),
+        ...(input.ivr ? { ivr: true } : {}),
+        ...(input.timezone ? { timezone: input.timezone } : {}),
+        ...(input.timeGreeting ? { timeGreeting: input.timeGreeting } : {}),
+        ...(input.botRole ? { botRole: input.botRole } : {}),
+        ...(input.calleeRole ? { calleeRole: input.calleeRole } : {}),
+      }),
       turn_detection: grokTurnDetection(input.turnDetection ?? DEFAULT_TURN_DETECTION, {
         createResponse,
         includeIdleTimeout,
@@ -154,6 +186,7 @@ export function sessionUpdatePayload(input: {
             },
           },
         },
+        SEND_DTMF_TOOL,
       ],
       tool_choice: "auto",
     },

@@ -24,6 +24,7 @@ export type TelnyxDialResult = {
 export type TelnyxClient = {
   dial: (body: TelnyxDialRequest) => Promise<TelnyxDialResult>;
   hangup: (callControlId: string) => Promise<void>;
+  sendDtmf?: (callControlId: string, digits: string) => Promise<void>;
 };
 
 type TelnyxHttpOptions = {
@@ -80,6 +81,25 @@ export class TelnyxHttpClient implements TelnyxClient {
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Telnyx hangup failed (${res.status}): ${text}`);
+    }
+  }
+
+  async sendDtmf(callControlId: string, digits: string): Promise<void> {
+    const res = await this.fetchImpl(
+      `${this.apiBase}/v2/calls/${callControlId}/actions/send_dtmf`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ digits }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Telnyx send_dtmf failed (${res.status}): ${text}`);
     }
   }
 }
