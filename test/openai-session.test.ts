@@ -50,6 +50,7 @@ describe("OpenAI Realtime session", () => {
       interrupt_response: true,
     });
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
+    expect(payload.session.tools.some((t) => t.name === "send_dtmf")).toBe(true);
     expect(payload.session.tools[0]?.description).toMatch(/thank-you/i);
     expect(payload.session.tools[0]?.description).not.toMatch(/summary/i);
     expect(payload.session.tools[0]?.description).toMatch(/recap/i);

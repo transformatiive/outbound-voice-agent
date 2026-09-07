@@ -153,6 +153,90 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(call.endedReason).toBe("end_call");
   });
 
+  it("sends Telnyx DTMF on send_dtmf and keeps listening without hanging up", async () => {
+    const grokSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const hangup = vi.fn(async () => undefined);
+    const sendDtmf = vi.fn(async () => undefined);
+    const call = sampleCall();
+    const bridge = new MediaBridge({
+      call,
+      sendGrok: grokSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup, sendDtmf },
+      hangupDelayMs: 0,
+    });
+
+    await bridge.onGrokEvent({
+      type: "response.function_call_arguments.done",
+      name: "send_dtmf",
+      call_id: "tool-dtmf",
+      arguments: JSON.stringify({ digits: "1#" }),
+    });
+
+    expect(sendDtmf).toHaveBeenCalledWith("v2:control-id", "1#");
+    expect(hangup).not.toHaveBeenCalled();
+    expect(call.endedReason).toBeUndefined();
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
+    expect(grokSend).toHaveBeenCalledWith({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "tool-dtmf",
+        output: JSON.stringify({ ok: true, digits: "1#" }),
+      },
+    });
+    expect(grokSend).toHaveBeenCalledWith({ type: "response.create" });
+
+    await bridge.onGrokEvent({
+      type: "response.output_item.done",
+      item: { name: "send_dtmf", call_id: "tool-dtmf" },
+    });
+    expect(sendDtmf).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects invalid send_dtmf digits without hanging up", async () => {
+    const hangup = vi.fn(async () => undefined);
+    const sendDtmf = vi.fn(async () => undefined);
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup, sendDtmf },
+      hangupDelayMs: 0,
+    });
+    await bridge.onGrokEvent({
+      type: "response.function_call_arguments.done",
+      name: "send_dtmf",
+      call_id: "tool-bad",
+      arguments: JSON.stringify({ digits: "abc!" }),
+    });
+    expect(sendDtmf).not.toHaveBeenCalled();
+    expect(hangup).not.toHaveBeenCalled();
+    expect(grokSend).toHaveBeenCalledWith({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: "tool-bad",
+        output: JSON.stringify({ ok: false, error: "invalid_digits" }),
+      },
+    });
+  });
+
+  it("uses call.voice rex on session.update greeting warmup", () => {
+    const grokSend = vi.fn();
+    new MediaBridge({
+      call: { ...sampleCall(), voice: "rex" },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    const update = grokSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0];
+    expect(update.session.voice).toBe("rex");
+  });
+
+
   it("does not hang up on end_call until goodbye response.done plus playout buffer", async () => {
     vi.useFakeTimers();
     const hangup = vi.fn(async () => undefined);
@@ -517,6 +601,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.audio.output.speed).toBe(1.05);
     expect(update.session.audio.input.transcription.language_hint).toBe("pt-PT");
     expect(update.session.tools[0].name).toBe("end_call");
+    expect(update.session.tools.some((t: { name: string }) => t.name === "send_dtmf")).toBe(true);
     expect(update.session.turn_detection).toEqual({
       type: "server_vad",
       threshold: 0.5,

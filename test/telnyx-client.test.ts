@@ -64,4 +64,23 @@ describe("Telnyx HTTP client", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("sends DTMF via Call Control actions/send_dtmf", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: { result: "ok" } }), { status: 200 }),
+    );
+    const client = new TelnyxHttpClient({
+      apiKey: "KEY",
+      apiBase: "https://api.telnyx.com",
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+    await client.sendDtmf("v2:abc", "1#");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.telnyx.com/v2/calls/v2:abc/actions/send_dtmf",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ digits: "1#" }),
+      }),
+    );
+  });
 });

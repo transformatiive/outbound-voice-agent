@@ -820,4 +820,52 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(openai.body.voice).toBe("coral");
     expect(telnyx.dial).toHaveBeenCalledTimes(3);
   });
+
+  it("accepts grok_voice rex per call, echoes grokVoice, and leaves GET /health on env ara", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: "secretário da Alfaseguros",
+        objective: "Navegar o IVR Vodafone.",
+        waitForCallee: true,
+        tts_provider: "grok",
+        grok_voice: "rex",
+        ivr: true,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.voice).toBe("rex");
+    expect(res.body.grokVoice).toBe("rex");
+    expect(res.body.ttsProvider).toBe("grok");
+    expect(res.body.ivr).toBe(true);
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+
+    const got = await request(app)
+      .get(`/api/calls/${res.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.status).toBe(200);
+    expect(got.body.voice).toBe("rex");
+    expect(got.body.grokVoice).toBe("rex");
+    expect(got.body.ivr).toBe(true);
+
+    const health = await request(app).get("/health");
+    expect(health.status).toBe(200);
+    expect(health.body.voice).toBe("ara");
+    expect(health.body.tts.grokVoice).toBe("ara");
+
+    const bad = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345679",
+        objective: "x",
+        grok_voice: "robot",
+      });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe("invalid_grok_voice");
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+  });
 });

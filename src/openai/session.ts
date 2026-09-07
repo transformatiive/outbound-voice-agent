@@ -1,4 +1,5 @@
 import { END_CALL_TOOL_DESCRIPTION, buildSessionInstructions, type Language } from "../prompt.js";
+import { SEND_DTMF_TOOL } from "../dtmf.js";
 import type { TurnDetectionSettings } from "../grok/session.js";
 import { DEFAULT_TURN_DETECTION } from "../grok/session.js";
 import { DEFAULT_OPENAI_VOICE } from "../tts.js";
@@ -167,6 +168,7 @@ export function openaiSessionUpdatePayload(input: {
   objective: string;
   extraInstructions?: string;
   waitForCallee?: boolean;
+  ivr?: boolean;
   timezone?: string;
   turnDetection?: TurnDetectionSettings;
   createResponse?: boolean;
@@ -192,6 +194,7 @@ export function openaiSessionUpdatePayload(input: {
         ...(input.timezone ? { timezone: input.timezone } : {}),
         ...(input.botRole ? { botRole: input.botRole } : {}),
         ...(input.calleeRole ? { calleeRole: input.calleeRole } : {}),
+        ...(input.ivr ? { ivr: true } : {}),
       }),
       audio: {
         input: {
@@ -211,7 +214,7 @@ export function openaiSessionUpdatePayload(input: {
           voice: input.voice,
         },
       },
-      tools: [END_CALL_TOOL],
+      tools: [END_CALL_TOOL, SEND_DTMF_TOOL],
       tool_choice: "auto",
     },
   };

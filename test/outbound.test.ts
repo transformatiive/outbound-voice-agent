@@ -319,3 +319,37 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(bad.error).toMatchObject({ status: 400, error: "invalid_bot_role" });
   });
 });
+
+describe("parseOutboundBody grok_voice and ivr", () => {
+  it("accepts documented Grok voices and defaults grok_voice when omitted", () => {
+    const omitted = parseOutboundBody(base);
+    expect(omitted.ok).toBe(true);
+    if (!omitted.ok) return;
+    expect(omitted.value.grokVoice).toBeUndefined();
+    expect(omitted.value.ivr).toBe(false);
+
+    for (const voice of ["ara", "eve", "rex", "sal", "leo", "Rex"] as const) {
+      const parsed = parseOutboundBody({ ...base, grok_voice: voice });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.grokVoice).toBe(voice.toLowerCase());
+    }
+
+    const bad = parseOutboundBody({ ...base, grok_voice: "robot" });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toMatchObject({ status: 400, error: "invalid_grok_voice" });
+  });
+
+  it("accepts ivr true and rejects non-boolean ivr", () => {
+    const parsed = parseOutboundBody({ ...base, ivr: true });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.ivr).toBe(true);
+
+    const bad = parseOutboundBody({ ...base, ivr: "yes" });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toMatchObject({ status: 400, error: "invalid_ivr" });
+  });
+});

@@ -51,6 +51,7 @@ describe("prompt / language", () => {
     expect(text).toMatch(/sotaque.*Brasil|fonética.*Brasil/i);
     expect(text).toMatch(/não a substituas|não a reescrevas/i);
     expect(text).toMatch(/end_call/);
+    expect(text).toMatch(/send_dtmf/);
     expect(text).not.toMatch(/British English/i);
     expect(text).not.toMatch(/American English/i);
     expect(text).toMatch(/pessoa ao telefone/);
@@ -492,5 +493,29 @@ describe("prompt / language", () => {
     expect(us).toMatch(/only opens at/);
     expect(us).toMatch(/THEIR statement/);
     assertNoSpokenBranding(us);
+  });
+
+  it("instructs send_dtmf for IVR keypress menus", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: defaultGreeting("pt-PT"),
+      objective: "Navegar o IVR Vodafone",
+      ivr: true,
+    });
+    expect(pt).toMatch(/send_dtmf/);
+    expect(pt).toMatch(/IVR/);
+    expect(pt).toMatch(/NÃO ditas os números|nunca ditas os números/i);
+    expect(pt).toMatch(/navegação IVR/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: defaultGreeting("en-GB"),
+      objective: "Navigate the IVR",
+      ivr: true,
+    });
+    expect(en).toMatch(/send_dtmf/);
+    expect(en).toMatch(/press keys/i);
+    assertNoSpokenBranding(en);
   });
 });

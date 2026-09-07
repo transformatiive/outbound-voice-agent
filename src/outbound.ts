@@ -4,6 +4,7 @@ import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./gree
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
 import { parseOpenAIVoice } from "./openai/session.js";
+import { GROK_VOICE_LIST, parseGrokVoice } from "./grok/session.js";
 import { parseTtsProvider, type TtsProvider } from "./tts.js";
 import { createElevenLabsTts } from "./elevenlabs.js";
 import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
@@ -33,6 +34,8 @@ export type OutboundBody = {
   bot_role?: unknown;
   callee_role?: unknown;
   openai_voice?: unknown;
+  grok_voice?: unknown;
+  ivr?: unknown;
 };
 
 export type OutboundError = { status: number; error: string; details?: unknown };
@@ -62,6 +65,8 @@ export function parseOutboundBody(
         calleeRole: string;
         ttsProvider: TtsProvider;
         openaiVoice?: string;
+        grokVoice?: string;
+        ivr: boolean;
       };
     }
   | { ok: false; error: OutboundError } {
@@ -133,6 +138,24 @@ export function parseOutboundBody(
   if (body.waitForCallee !== undefined && body.waitForCallee !== null && typeof body.waitForCallee !== "boolean") {
     return { ok: false, error: { status: 400, error: "invalid_waitForCallee" } };
   }
+  if (body.ivr !== undefined && body.ivr !== null && typeof body.ivr !== "boolean") {
+    return { ok: false, error: { status: 400, error: "invalid_ivr" } };
+  }
+  let grokVoice: string | undefined;
+  const grokVoiceParsed = parseGrokVoice(body.grok_voice);
+  if (!grokVoiceParsed.ok) {
+    return {
+      ok: false,
+      error: {
+        status: 400,
+        error: "invalid_grok_voice",
+        details: `grok_voice must be ${GROK_VOICE_LIST}`,
+      },
+    };
+  }
+  if (body.grok_voice !== undefined && body.grok_voice !== null && body.grok_voice !== "") {
+    grokVoice = grokVoiceParsed.value;
+  }
   let timezone = DEFAULT_TIMEZONE;
   if (body.timezone !== undefined && body.timezone !== null && body.timezone !== "") {
     if (typeof body.timezone !== "string" || !isValidTimeZone(body.timezone.trim())) {
@@ -149,6 +172,7 @@ export function parseOutboundBody(
   }
   const waitForCallee =
     body.waitForCallee === true || (body.waitForCallee !== false && instructionsRequestWait(extra));
+  const ivr = body.ivr === true;
   const greeting = composeSpokenGreeting({
     language,
     ...(personaRaw ? { persona: personaRaw } : {}),
@@ -178,7 +202,9 @@ export function parseOutboundBody(
       botRole: botRoleParsed.value,
       calleeRole: calleeRoleParsed.value,
       ttsProvider: ttsProviderParsed.value,
+      ivr,
       ...(openaiVoice ? { openaiVoice } : {}),
+      ...(grokVoice ? { grokVoice } : {}),
       ...(personaRaw ? { persona: personaRaw } : {}),
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
@@ -238,7 +264,10 @@ export async function placeOutboundCall(opts: {
   const spokenVoice =
     parsed.value.ttsProvider === "openai"
       ? parsed.value.openaiVoice ?? opts.config.openai.voice
-      : opts.config.grokVoice;
+      : parsed.value.grokVoice ?? opts.config.grokVoice;
+  if (parsed.value.ttsProvider === "grok") {
+    console.info(`[outbound] tts_provider=grok; Telnyx voice is Grok ${spokenVoice}`);
+  }
   const model =
     parsed.value.ttsProvider === "openai" ? opts.config.openai.model : opts.config.grokModel;
 
@@ -258,6 +287,7 @@ export async function placeOutboundCall(opts: {
     calleeRole: parsed.value.calleeRole,
     ttsProvider: parsed.value.ttsProvider,
     ...(parsed.value.persona ? { persona: parsed.value.persona } : {}),
+    ...(parsed.value.ivr ? { ivr: true } : {}),
     voice: spokenVoice,
     model,
     streamToken,

@@ -23,6 +23,7 @@ import {
   type CalleeSpeechGateConfig,
 } from "../bridge/callee-speech.js";
 import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "../grok/session.js";
+import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 import {
   openaiAssistantGreetingItem,
@@ -95,6 +96,7 @@ export class OpenAIMediaBridge {
     done: true,
   };
   private readonly responseDoneWaiters: Array<() => void> = [];
+  private readonly handledToolCalls = new Set<string>();
   private closed = false;
 
   constructor(opts: OpenAIMediaBridgeOptions) {
@@ -175,6 +177,7 @@ export class OpenAIMediaBridge {
         turnDetection: this.turnDetection,
         createResponse: autoRespond,
         includeIdleTimeout: autoRespond,
+        ...(this.call.ivr ? { ivr: true } : {}),
       }) as unknown as JsonObject,
     );
     this.sessionConfigured = true;
@@ -322,21 +325,30 @@ export class OpenAIMediaBridge {
       }
       case "response.function_call_arguments.done":
       case "response.output_item.done": {
-        const item = event.item as JsonObject | undefined;
-        const name = String(event.name ?? item?.name ?? "");
-        if (name !== "end_call") return;
-        const callId = String(event.call_id ?? item?.call_id ?? "");
-        if (callId) {
-          this.sendOpenAI({
-            type: "conversation.item.create",
-            item: {
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify({ ok: true }),
-            },
-          });
-        }
-        await this.requestHangup("end_call");
+        await handleRealtimeToolCall({
+          event,
+          alreadyHandled: this.handledToolCalls,
+          telnyx: this.telnyx,
+          callControlId: this.call.telnyx.callControlId,
+          callId: this.call.id,
+          sendOutput: (toolCallId, output) => {
+            this.sendOpenAI({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: toolCallId,
+                output,
+              },
+            });
+          },
+          onEndCall: () => this.requestHangup("end_call"),
+          onDtmfContinue: () => {
+            this.sendOpenAI({ type: "response.create" });
+          },
+          clearPlayback: () => {
+            this.sendTelnyx({ event: "clear" });
+          },
+        });
         return;
       }
       case "error":

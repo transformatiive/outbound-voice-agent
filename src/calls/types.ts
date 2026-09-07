@@ -32,6 +32,7 @@ export type CallRecord = {
   botRole?: string;
   calleeRole?: string;
   ttsProvider?: TtsProvider;
+  ivr?: boolean;
   metadata?: Record<string, unknown>;
   voice: string;
   model: string;
@@ -63,6 +64,8 @@ export type PublicCall = {
   calleeRole: string;
   ttsProvider: TtsProvider;
   voice: string;
+  grokVoice?: string;
+  ivr: boolean;
   model: string;
   telnyx: {
     callControlId?: string;
@@ -91,6 +94,7 @@ export function toPublicCall(call: CallRecord): PublicCall {
     calleeRole: call.calleeRole ?? DEFAULT_CALLEE_ROLE,
     ttsProvider: call.ttsProvider ?? DEFAULT_TTS_PROVIDER,
     voice: call.voice,
+    ivr: call.ivr === true,
     model: call.model,
     telnyx: { ...call.telnyx },
     transcript: [...call.transcript],
@@ -100,5 +104,6 @@ export function toPublicCall(call: CallRecord): PublicCall {
     ...(call.endedAt !== undefined ? { endedAt: call.endedAt } : {}),
     ...(call.error !== undefined ? { error: call.error } : {}),
     ...(call.persona !== undefined ? { persona: call.persona } : {}),
+    ...(call.ttsProvider !== "openai" ? { grokVoice: call.voice } : {}),
   };
 }

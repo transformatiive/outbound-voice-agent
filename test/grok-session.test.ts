@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grokRealtimeUrl, sessionUpdatePayload, GROK_REASONING_EFFORT } from "../src/grok/session.js";
+import { grokRealtimeUrl, sessionUpdatePayload, GROK_REASONING_EFFORT, parseGrokVoice } from "../src/grok/session.js";
 
 describe("Grok Voice Live 2 session", () => {
   it("targets the xAI realtime websocket with the configured model", () => {
@@ -41,6 +41,8 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.tools[0]?.description).toMatch(/thank-you/i);
     expect(payload.session.tools[0]?.description).not.toMatch(/summary/i);
     expect(payload.session.tools[0]?.description).toMatch(/recap/i);
+    expect(payload.session.tools.some((t) => t.name === "send_dtmf")).toBe(true);
+    expect(payload.session.instructions).toMatch(/send_dtmf/);
     expect(payload.session.instructions).toMatch(/então fica marcado para/);
     expect(payload.session.instructions).toMatch(/Não narres/i);
     expect(payload.session.instructions).not.toMatch(/confirma os detalhes numa frase/);
@@ -107,5 +109,22 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.audio.output.speed).toBe(1.05);
     expect(payload.session.turn_detection.create_response).toBe(false);
     expect(payload.session.turn_detection.interrupt_response).toBe(true);
+  });
+
+  it("parses grok_voice and rejects unknown names", () => {
+    expect(parseGrokVoice(undefined).ok).toBe(true);
+    expect(parseGrokVoice("rex")).toEqual({ ok: true, value: "rex" });
+    expect(parseGrokVoice("Leo")).toEqual({ ok: true, value: "leo" });
+    expect(parseGrokVoice("robot")).toEqual({ ok: false });
+  });
+
+  it("applies male voice rex on session.update", () => {
+    const payload = sessionUpdatePayload({
+      voice: "rex",
+      language: "pt-PT",
+      greeting: "Olá.",
+      objective: "x",
+    });
+    expect(payload.session.voice).toBe("rex");
   });
 });
