@@ -69,7 +69,7 @@ The product bar is the ChatGPT voice app: **no cold start on first speech**, **b
 
 `bot_role` (default `caller_booking`) and `callee_role` (default `venue_staff`) are optional labels. The bot **always** placed the call and requests the booking. The callee answered (venue staff / reception). The bot never welcomes as the restaurant and never offers tables as the house.
 
-`persona` is the optional spoken identity (preferred over `greeting` when both are sent). Compose: Lisbon time-of-day (`Bom dia` / `Boa tarde` / `Boa noite`) + **«sou a/o [persona]»** + sanitized ask from `objective`. Never prefix `Olá` / `Hello`. Instruction-stuffed `persona`/`greeting` lines («Fala português…», «Nunca uses brasileiroismos», «Tu LIGAS», ROLEPLAY, IA, Ara, gravada) are stripped and never spoken. `greeting` remains supported as the identity line when `persona` is omitted; a polluted `greeting` is ignored when `persona` + `objective`/`spokenAsk` can compose a clean line. If both identity fields are omitted, the service inserts a caller identity («sou a secretária» / “this is the secretary”). Raw `ROLEPLAY` / prompt dumps in `objective` are **never** copied into `force_message`. Optional `spokenAsk` is a clean one-line ask used when `objective` is a script. `waitForCallee` no longer requires `greeting`.
+`persona` is the optional **short role title** only (e.g. `assistente do André Barreto`, `secretária da Alfaseguros`). Put anti-BR rules, voice-casting (`Mulher de Lisboa`), style notes (`Tom humano`), and lexicon lists in `instructions`, **not** in `persona`. Spoken greeting prefers an explicit clean `greeting` field when it is natural spoken prose; otherwise it sanitizes `persona` to a short identity clause (`sou a/o …`). Voice-casting and style notes are never identity and never wrapped as «Ligo sobre …». Compose: Lisbon time-of-day (`Bom dia` / `Boa tarde` / `Boa noite`) + **«sou a/o [role]»** + optional short ask from `objective` / `spokenAsk`. Never prefix `Olá` / `Hello`. Instruction-stuffed `persona`/`greeting` lines («Fala português…», «Nunca uses brasileiroismos», «REGRA ABSOLUTA», «Tu LIGAS», ROLEPLAY, IA, Ara, gravada) are stripped and never spoken. If no clean spoken ask can be derived, the greeting is time + identity only. If both identity fields are omitted, the service inserts a caller identity («sou a secretária» / “this is the secretary”). Raw `ROLEPLAY` / prompt dumps in `objective` are **never** copied into `force_message`. Optional `spokenAsk` is a clean one-line ask used when `objective` is a script. `waitForCallee` no longer requires `greeting`.
 
 Optional `timezone` is an IANA name (default `Europe/Lisbon`). Invalid values are 400 `invalid_timezone`.
 
@@ -85,8 +85,8 @@ Time-of-day (`pt-PT`): `Bom dia` before 12:00, `Boa tarde` from 12:00 until 20:0
 {
   "to": "+351912345678",
   "language": "pt-PT",
-  "persona": "secretária da Alfaseguros",
-  "greeting": "Olá, fala a secretária da Alfaseguros.",
+  "persona": "assistente do André Barreto",
+  "greeting": "sou a assistente do André Barreto.",
   "objective": "Confirmar a marcação de quinta-feira às 16h.",
   "spokenAsk": "Confirmar a marcação de quinta-feira às 16h.",
   "timezone": "Europe/Lisbon",
@@ -102,9 +102,22 @@ Time-of-day (`pt-PT`): `Bom dia` before 12:00, `Boa tarde` from 12:00 until 20:0
 }
 ```
 
-Example spoken `force_message` from that body at 13:00 Lisbon: `Boa tarde, sou a secretária da Alfaseguros. Confirmar a marcação de quinta-feira às 16h.`
+Example spoken `force_message` from that body at 13:00 Lisbon: `Boa tarde, sou a assistente do André Barreto. Confirmar a marcação de quinta-feira às 16h.`
 
-TRNSF can omit `greeting` and send only `persona` + `objective` + `waitForCallee: true`. Roles default to caller booking vs venue staff even when omitted.
+TRNSF can omit `greeting` and send only a **short** `persona` (role title) + `objective` + `waitForCallee: true`. Do not put anti-BR / style / voice-casting into `persona` — use `instructions`. Roles default to caller booking vs venue staff even when omitted.
+
+### Transcripts
+
+`GET /api/calls/:id` and `RESULT_WEBHOOK` read `call.transcript` from in-memory `CallStore`. Capture is best-effort on the live WebSocket:
+
+- **User lines** from `conversation.item.input_audio_transcription.{completed,updated,delta}` (and `conversation.item.created` when the item is `role=user`). Pending user text is flushed on greeting unlock, `speech_stopped` after the greeting, `response.created` / `response.done`, transcription `.completed` after the greeting, and hangup (`markEnded` / Telnyx hangup webhook).
+- **Assistant lines** from `response.audio_transcript.done` / `response.output_audio_transcript.done` / text.done, plus **`response.done`** (`assistantTextFromResponse`) when Grok omits the audio-transcript events (Think Fast 2.0). Greeting text is also recorded in `speakGreeting`. Consecutive identical role+text lines are deduped.
+- xAI only emits user caption events when `audio.input.transcription.model` is **`grok-transcribe`**. `language_hint` (`pt-PT` / `en`) only biases ASR; it does not turn captions on. Session update also sets `model: grok-transcribe` (documented in xAI speech-to-speech: `.updated` is the xAI name for OpenAI `.delta`).
+- **No output accent/locale flag:** xAI Speech-to-Speech has no separate spoken-language or accent field. Spoken pt-PT is locked in session **instructions** (anti-mirror: never switch to pt-BR mid-call even if the callee does). `language_hint: "pt-PT"` is re-sent on the post-greeting `session.update` (after cached greeting audio has played — **not** on waitForCallee unlock, which would interrupt warm-on-dial).
+- Unknown Grok event **type names** are logged once per call (`unknown grok event type=…`) without audio payloads, so renamed transcription events are visible.
+- `waitForCallee`: if inbound Telnyx media is flowing but the greeting never unlocks within 8s, the bridge logs an error with the call id and **does not invent speech**. Hangup while still waiting logs `waitForCallee never unlocked`. Empty `transcript: []` on an answered waitForCallee call (e.g. `90738a84`) means the greeting stayed muted (no VAD/transcript unlock), not that later turns were dropped.
+
+The same listen-and-answer + pt-PT anti-mirror instructions apply to `tts_provider=grok`, `elevenlabs` (Grok still does dialogue), and `openai`.
 
 `GET /health` still reports the default env voice (`GROK_VOICE`, usually `ara`). `POST /api/outbound` and `GET /api/calls/:id` echo the **voice used on that call** (`voice` / `grokVoice`).
 

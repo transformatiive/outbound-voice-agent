@@ -266,6 +266,29 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.value.persona).toBe(dumped);
   });
 
+  it("strips call 28619c45 voice-casting persona out of the spoken greeting", () => {
+    const persona =
+      "Mulher de Lisboa. Assistente do Andre Barreto. Tom humano, curto. REGRA ABSOLUTA: portugues europeu.";
+    const parsed = parseOutboundBody(
+      {
+        to: "+351912345678",
+        language: "pt-PT",
+        persona,
+        objective:
+          "REGRA ABSOLUTA: portugues europeu. Ao atender: Boa tarde, sou a assistente do Andre Barreto. Ligo da FedEx sobre uma entrega em Lisboa.",
+        waitForCallee: true,
+      },
+      { now: LISBON_AFTERNOON },
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.greeting).toMatch(/^Boa tarde, sou a assistente do Andre Barreto\./);
+    expect(parsed.value.greeting).not.toMatch(/mulher de lisboa/i);
+    expect(parsed.value.greeting).not.toMatch(/Ligo sobre mulher/i);
+    expect(parsed.value.greeting).not.toMatch(/REGRA ABSOLUTA/i);
+    expect(parsed.value.persona).toBe(persona);
+  });
+
   it("accepts tts_provider grok | elevenlabs | openai and rejects other values", () => {
     const grok = parseOutboundBody({ ...base, tts_provider: "grok" });
     expect(grok.ok).toBe(true);

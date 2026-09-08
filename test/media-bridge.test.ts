@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MediaBridge } from "../src/bridge/media-bridge.js";
+import { MediaBridge, DEFAULT_WAIT_FOR_CALLEE_STALL_MS } from "../src/bridge/media-bridge.js";
 import { DEFAULT_CALLEE_SPEECH_GRACE_MS } from "../src/bridge/callee-speech.js";
 import type { ElevenLabsTts } from "../src/elevenlabs.js";
 import type { CallRecord } from "../src/calls/types.js";
@@ -583,6 +583,151 @@ describe("media bridge Telnyx ↔ Grok", () => {
     ]);
   });
 
+  it("records user + assistant from transcription.completed and response.done", async () => {
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await playGreeting(bridge);
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Sim, está confirmado",
+    });
+    await bridge.onGrokEvent({
+      type: "response.done",
+      response: {
+        id: "turn-1",
+        output: [
+          {
+            type: "message",
+            content: [{ type: "output_audio", transcript: "Perfeito, até quinta." }],
+          },
+        ],
+      },
+    });
+    expect(bridge.call.transcript).toEqual([
+      { role: "assistant", text: "Olá, fala a secretária." },
+      { role: "user", text: "Sim, está confirmado" },
+      { role: "assistant", text: "Perfeito, até quinta." },
+    ]);
+  });
+
+  it("captures assistant text from response.done when audio_transcript.done never arrives", async () => {
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await playGreeting(bridge);
+    await bridge.onGrokEvent({ type: "response.created", response_id: "turn-1" });
+    await bridge.onGrokEvent({
+      type: "response.done",
+      response_id: "turn-1",
+      response: {
+        id: "turn-1",
+        output: [
+          {
+            type: "message",
+            content: [{ transcript: "Certo, fica então para as 16h." }],
+          },
+        ],
+      },
+    });
+    expect(bridge.call.transcript).toEqual([
+      { role: "assistant", text: "Olá, fala a secretária." },
+      { role: "assistant", text: "Certo, fica então para as 16h." },
+    ]);
+  });
+
+  it("does not duplicate assistant lines when audio_transcript.done and response.done both fire", async () => {
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await playGreeting(bridge);
+    await bridge.onGrokEvent({
+      type: "response.audio_transcript.done",
+      response_id: "turn-1",
+      transcript: "Perfeito.",
+    });
+    await bridge.onGrokEvent({
+      type: "response.done",
+      response_id: "turn-1",
+      response: {
+        id: "turn-1",
+        output: [{ type: "message", content: [{ transcript: "Perfeito." }] }],
+      },
+    });
+    expect(bridge.call.transcript.filter((line) => line.text === "Perfeito.")).toHaveLength(1);
+  });
+
+  it("logs unknown Grok event types once per call without payloads", async () => {
+    const logs: string[] = [];
+    const spyLog = vi.spyOn(console, "info").mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    });
+    const bridge = new MediaBridge({
+      call: sampleCall(),
+      sendGrok: vi.fn(),
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    await bridge.onGrokEvent({ type: "conversation.item.foo", audio: "AAAA" });
+    await bridge.onGrokEvent({ type: "conversation.item.foo", audio: "BBBB" });
+    await bridge.onGrokEvent({ type: "response.mystery", delta: "secret-audio" });
+    const unknown = logs.filter((line) => /unknown grok event type=/.test(line));
+    expect(unknown).toEqual([
+      "[bridge call-1] unknown grok event type=conversation.item.foo",
+      "[bridge call-1] unknown grok event type=response.mystery",
+    ]);
+    expect(logs.some((line) => /secret-audio|AAAA/.test(line))).toBe(false);
+    spyLog.mockRestore();
+  });
+
+  it("logs waitForCallee stall when media flows but unlock never happens, without inventing speech", async () => {
+    const clock = { ms: 0 };
+    const errors: string[] = [];
+    const spyErr = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    const grokSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendGrok: grokSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    clock.ms = 100;
+    bridge.onTelnyxMessage({
+      event: "media",
+      media: { track: "inbound", payload: "QUJDRA==" },
+    });
+    expect(forceMessageCount(grokSend)).toBe(0);
+
+    clock.ms = DEFAULT_WAIT_FOR_CALLEE_STALL_MS;
+    bridge.onTelnyxMessage({
+      event: "media",
+      media: { track: "inbound", payload: "QUJDRA==" },
+    });
+    expect(forceMessageCount(grokSend)).toBe(0);
+    expect(bridge.call.transcript).toEqual([]);
+    expect(
+      errors.some((line) =>
+        /waitForCallee stall: inbound media flowing but greeting never unlocked/.test(line),
+      ),
+    ).toBe(true);
+    expect(errors.some((line) => /not inventing speech/.test(line))).toBe(true);
+    spyErr.mockRestore();
+  });
+
   it("builds the Grok session.update for voice ara, PCMU, and end_call", () => {
     const grokSend = vi.fn();
     const bridge = new MediaBridge({
@@ -600,6 +745,7 @@ describe("media bridge Telnyx ↔ Grok", () => {
     expect(update.session.audio.output.format).toEqual({ type: "audio/pcmu" });
     expect(update.session.audio.output.speed).toBe(1.05);
     expect(update.session.audio.input.transcription.language_hint).toBe("pt-PT");
+    expect(update.session.audio.input.transcription.model).toBe("grok-transcribe");
     expect(update.session.tools[0].name).toBe("end_call");
     expect(update.session.tools.some((t: { name: string }) => t.name === "send_dtmf")).toBe(true);
     expect(update.session.turn_detection).toEqual({

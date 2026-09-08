@@ -218,4 +218,47 @@ describe("OpenAI Realtime media bridge", () => {
       .at(-1);
     expect(talking?.session?.audio?.input?.turn_detection?.create_response).toBe(true);
   });
+
+  it("records user + assistant from transcription.completed and response.done", async () => {
+    const telnyxSend = vi.fn();
+    const bridge = new OpenAIMediaBridge({
+      call: sampleCall(),
+      sendOpenAI: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.attachTelnyx(telnyxSend);
+    await bridge.onOpenAIEvent({ type: "session.updated" });
+    await bridge.onOpenAIEvent({
+      type: "response.created",
+      response: { id: "greet-1", metadata: { purpose: "greeting" } },
+    });
+    await bridge.onOpenAIEvent({
+      type: "response.output_audio.delta",
+      response_id: "greet-1",
+      delta: "UlRQQQ==",
+    });
+    await bridge.onOpenAIEvent({
+      type: "response.done",
+      response: { id: "greet-1", metadata: { purpose: "greeting" } },
+    });
+    await bridge.onOpenAIEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      item_id: "u1",
+      transcript: "Yes, Thursday works",
+    });
+    await bridge.onOpenAIEvent({
+      type: "response.done",
+      response_id: "turn-1",
+      response: {
+        id: "turn-1",
+        output: [{ type: "message", content: [{ transcript: "Perfect, see you then." }] }],
+      },
+    });
+    expect(bridge.call.transcript).toEqual([
+      { role: "assistant", text: "Olá, fala a secretária." },
+      { role: "user", text: "Yes, Thursday works" },
+      { role: "assistant", text: "Perfect, see you then." },
+    ]);
+  });
 });

@@ -42,6 +42,8 @@ export type JsonObject = Record<string, unknown>;
 /** Extra Telnyx playout after Grok `response.done` (Think Fast 2.0 can call end_call mid-sentence). */
 export const DEFAULT_HANGUP_PLAYOUT_BUFFER_MS = 1000;
 export const DEFAULT_HANGUP_MAX_WAIT_MS = 15_000;
+/** waitForCallee: log if inbound media is flowing but greeting never unlocked. Do not invent speech. */
+export const DEFAULT_WAIT_FOR_CALLEE_STALL_MS = 8_000;
 const PCMU_BYTES_PER_MS = 8;
 
 type ElLatencyTrace = {
@@ -132,6 +134,10 @@ export class MediaBridge {
   };
   private readonly responseDoneWaiters: Array<() => void> = [];
   private readonly handledToolCalls = new Set<string>();
+  private readonly unknownGrokEventTypes = new Set<string>();
+  private inboundMediaFrames = 0;
+  private waitForCalleeStallLogged = false;
+  private waitForCalleeNeverUnlockedLogged = false;
 
   constructor(opts: MediaBridgeOptions) {
     this.call = opts.call;
@@ -272,6 +278,7 @@ export class MediaBridge {
     // Do not session.update here. A second update on unlock interrupts the warm
     // force_message audio and makes Grok think again before first Telnyx media.
     // create_response stays false until maybeFinishGreetingPlayback after frames play.
+    // language_hint + grok-transcribe are re-asserted then (safe; not on unlock).
   }
 
   onTelnyxMessage(message: JsonObject): void {
@@ -292,9 +299,11 @@ export class MediaBridge {
         const media = message.media as JsonObject | undefined;
         const payload = media?.payload;
         if (typeof payload === "string" && payload.length > 0) {
+          this.inboundMediaFrames += 1;
           this.sendGrok({ type: "input_audio_buffer.append", audio: payload });
         }
         this.maybeUnlockAfterGrace("media");
+        this.maybeLogWaitForCalleeStall();
         return;
       }
       case "stop":
@@ -356,10 +365,15 @@ export class MediaBridge {
           this.logCalleeGate(decision, "speech_stopped");
           if (decision.unlock) this.speakGreeting();
         } else if (this.greetingSent) {
+          this.flushUserTranscript();
           this.lastSpeechStoppedAtMs = this.clockMs();
           this.beginElTrace("turn", { speechStoppedAtMs: this.lastSpeechStoppedAtMs });
           this.logElStage("speech_stopped");
         }
+        return;
+      }
+      case "conversation.item.created": {
+        this.captureCreatedUserItem(event);
         return;
       }
       case "conversation.item.input_audio_transcription.completed":
@@ -372,11 +386,12 @@ export class MediaBridge {
           const decision = onTranscript(true, raw);
           this.logCalleeGate(decision, "transcript", raw);
           if (!decision.unlock) return;
-          if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+          this.storePendingUser(itemId, transcript);
           this.speakGreeting();
           return;
         }
-        if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+        this.storePendingUser(itemId, transcript);
+        if (type.endsWith(".completed") && this.greetingSent) this.flushUserTranscript();
         return;
       }
       case "response.output_audio_transcript.delta":
@@ -431,6 +446,7 @@ export class MediaBridge {
         console.error(`[bridge ${this.call.id}] grok error`, JSON.stringify(event).slice(0, 400));
         return;
       default:
+        this.logUnknownGrokEvent(type);
         return;
     }
   }
@@ -457,6 +473,8 @@ export class MediaBridge {
   markEnded(reason: string): void {
     this.abortElevenLabsPlayback();
     this.greetingAudioCache.drop(this.call.id);
+    this.flushUserTranscript();
+    this.logWaitForCalleeNeverUnlocked("hangup");
     if (this.call.status === "completed" || this.call.status === "failed" || this.call.status === "no_answer" || this.call.status === "busy") {
       this.onEnded?.(this.call);
       return;
@@ -464,8 +482,13 @@ export class MediaBridge {
     this.call.status = reason === "error" ? "failed" : "completed";
     this.call.endedReason = this.call.endedReason ?? reason;
     this.call.endedAt = this.now();
-    this.flushUserTranscript();
     this.onEnded?.(this.call);
+  }
+
+  /** Flush pending user lines before hangup webhook / result POST. */
+  flushTranscript(): void {
+    this.flushUserTranscript();
+    this.logWaitForCalleeNeverUnlocked("hangup");
   }
 
   private isWaitingForCalleeSpeech(): boolean {
@@ -489,6 +512,7 @@ export class MediaBridge {
       this.suppressAssistantAudio = false;
       if (responseId) this.greetingResponseId = responseId;
       if (!this.wantsElevenLabsPlayback()) this.beginTurnAudio();
+      this.flushUserTranscript();
       return;
     }
     if (this.suppressUntilNextCalleeSpeech) {
@@ -503,6 +527,7 @@ export class MediaBridge {
     } else {
       this.beginTurnAudio();
     }
+    this.flushUserTranscript();
   }
 
   private onGrokResponseDone(event: JsonObject): void {
@@ -510,6 +535,7 @@ export class MediaBridge {
     const greetingResponse =
       (this.greetingResponseId && responseId === this.greetingResponseId) ||
       (this.greetingForceSent && !this.grokGreetingComplete && (!responseId || !this.greetingResponseId));
+    this.captureAssistantFromResponseDone(event, greetingResponse);
     if (greetingResponse) {
       if (this.wantsElevenLabsPlayback()) {
         this.grokGreetingComplete = true;
@@ -674,6 +700,8 @@ export class MediaBridge {
     if (!this.greetingPlaying) return;
     if (!this.greetingGrokDone || !this.greetingElDone) return;
     this.greetingPlaying = false;
+    // Re-assert language_hint + grok-transcribe after greeting audio has played.
+    // Must not run on unlock — that would interrupt warm-on-dial PCMU.
     this.configureGrokSession();
   }
 
@@ -1082,6 +1110,72 @@ export class MediaBridge {
     this.speakGreeting();
   }
 
+  private maybeLogWaitForCalleeStall(): void {
+    if (!this.isWaitingForCalleeSpeech() || this.waitForCalleeStallLogged) return;
+    if (this.inboundMediaFrames === 0) return;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    if (elapsed === undefined || elapsed < DEFAULT_WAIT_FOR_CALLEE_STALL_MS) return;
+    this.waitForCalleeStallLogged = true;
+    console.error(
+      `[bridge ${this.call.id}] waitForCallee stall: inbound media flowing but greeting never unlocked after ${elapsed}ms (frames=${this.inboundMediaFrames}); agent stayed muted; not inventing speech`,
+    );
+  }
+
+  private logWaitForCalleeNeverUnlocked(phase: string): void {
+    if (!this.isWaitingForCalleeSpeech() || this.waitForCalleeNeverUnlockedLogged) return;
+    this.waitForCalleeNeverUnlockedLogged = true;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    const elapsedLabel =
+      elapsed === undefined ? "stream not started" : `${elapsed}ms since stream start`;
+    console.error(
+      `[bridge ${this.call.id}] waitForCallee never unlocked (${phase}): ${elapsedLabel}, inbound_media_frames=${this.inboundMediaFrames}, greetingSent=false; not inventing speech`,
+    );
+  }
+
+  private logUnknownGrokEvent(type: string): void {
+    if (!type || this.unknownGrokEventTypes.has(type)) return;
+    this.unknownGrokEventTypes.add(type);
+    console.info(`[bridge ${this.call.id}] unknown grok event type=${type}`);
+  }
+
+  private captureCreatedUserItem(event: JsonObject): void {
+    const item = event.item;
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const rec = item as JsonObject;
+    if (rec.role !== "user") return;
+    const itemId =
+      typeof rec.id === "string" && rec.id
+        ? rec.id
+        : typeof event.item_id === "string"
+          ? event.item_id
+          : "";
+    const raw = calleeTranscriptFromEvent(event);
+    const transcript = raw.trim();
+    if (!transcript) return;
+    if (this.isWaitingForCalleeSpeech()) {
+      const decision = onTranscript(true, raw);
+      this.logCalleeGate(decision, "item.created", raw);
+      if (!decision.unlock) return;
+      this.storePendingUser(itemId, transcript);
+      this.speakGreeting();
+      return;
+    }
+    this.storePendingUser(itemId, transcript);
+    if (this.greetingSent) this.flushUserTranscript();
+  }
+
+  private captureAssistantFromResponseDone(event: JsonObject, greetingResponse: boolean): void {
+    if (this.isWaitingForCalleeSpeech() || !this.greetingSent || greetingResponse) return;
+    this.flushUserTranscript();
+    const text = assistantTextFromResponse(event);
+    if (text) this.pushTranscript({ role: "assistant", text });
+  }
+
+  private storePendingUser(itemId: string, transcript: string): void {
+    if (!transcript) return;
+    this.pendingUser.set(itemId || "anon", transcript);
+  }
+
   private logCalleeGate(decision: CalleeSpeechDecision, event: string, transcript?: string): void {
     if (decision.reason === "not_waiting") return;
     const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
@@ -1128,14 +1222,19 @@ function assistantTextFromEvent(event: JsonObject): string {
   return "";
 }
 
-function assistantTextFromResponse(event: JsonObject): string {
+export function assistantTextFromResponse(event: JsonObject): string {
   const response = event.response as JsonObject | undefined;
   const output = response?.output;
   if (!Array.isArray(output)) return "";
   const parts: string[] = [];
   for (const item of output) {
     if (!item || typeof item !== "object") continue;
-    const content = (item as JsonObject).content;
+    const rec = item as JsonObject;
+    if (rec.type === "function_call" || rec.type === "function_call_output") continue;
+    if (typeof rec.transcript === "string" && rec.transcript.trim()) {
+      parts.push(rec.transcript.trim());
+    }
+    const content = rec.content;
     if (!Array.isArray(content)) continue;
     for (const part of content) {
       if (!part || typeof part !== "object") continue;

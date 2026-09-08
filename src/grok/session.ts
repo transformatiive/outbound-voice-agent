@@ -76,6 +76,9 @@ export const DEFAULT_OUTPUT_SPEED = 1.05;
  */
 export const GROK_REASONING_EFFORT = "none" as const;
 
+/** Required for xAI user-caption events (`conversation.item.input_audio_transcription.updated`). */
+export const GROK_TRANSCRIBE_MODEL = "grok-transcribe" as const;
+
 export type GrokSessionUpdate = {
   type: "session.update";
   session: {
@@ -86,7 +89,7 @@ export type GrokSessionUpdate = {
     audio: {
       input: {
         format: { type: "audio/pcmu" };
-        transcription: { language_hint: string };
+        transcription: { model: typeof GROK_TRANSCRIBE_MODEL; language_hint: string };
       };
       output: { format: { type: "audio/pcmu" }; speed: number };
     };
@@ -169,7 +172,10 @@ export function sessionUpdatePayload(input: {
       audio: {
         input: {
           format: { type: "audio/pcmu" },
-          transcription: { language_hint: languageHint(input.language) },
+          transcription: {
+            model: GROK_TRANSCRIBE_MODEL,
+            language_hint: languageHint(input.language),
+          },
         },
         output: { format: { type: "audio/pcmu" }, speed: outputSpeed },
       },
