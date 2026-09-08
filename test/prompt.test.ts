@@ -49,6 +49,11 @@ describe("prompt / language", () => {
     expect(text).toMatch(/NUNCA falas pelos dois lados/);
     expect(text).toMatch(/sotaque padrão de Lisboa/i);
     expect(text).toMatch(/sotaque.*Brasil|fonética.*Brasil/i);
+    expect(text).toMatch(/ANTI-ESPELHO/i);
+    expect(text).toMatch(/Nunca espelhes/i);
+    expect(text).toMatch(/Escuta e responde/i);
+    expect(text).toMatch(/NUNCA leias, despejes/);
+    expect(text).toMatch(/não despejes o objetivo/i);
     expect(text).toMatch(/não a substituas|não a reescrevas/i);
     expect(text).toMatch(/end_call/);
     expect(text).toMatch(/send_dtmf/);
@@ -88,6 +93,8 @@ describe("prompt / language", () => {
     expect(us).toMatch(/person on a live phone call/);
     expect(gb).toMatch(/NEVER invent facts/);
     expect(us).toMatch(/headcount/);
+    expect(gb).toMatch(/Listen and answer/i);
+    expect(gb).toMatch(/NEVER read out, dump/);
     expect(gb).toMatch(/exactly once/);
     expect(gb).toMatch(/warm, attentive, natural/);
     assertNoSpokenBranding(gb);
@@ -493,6 +500,39 @@ describe("prompt / language", () => {
     expect(us).toMatch(/only opens at/);
     expect(us).toMatch(/THEIR statement/);
     assertNoSpokenBranding(us);
+  });
+
+  it("locks pt-PT anti-mirror and forbids dumping the Objective onto the line", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: defaultGreeting("pt-PT"),
+      objective: "Confirmar uma entrega FedEx em Lisboa",
+      extraInstructions: "Nunca uses brasileiroismos.",
+      waitForCallee: true,
+    });
+    expect(pt).toMatch(/ANTI-ESPELHO/);
+    expect(pt).toMatch(/português do Brasil/);
+    expect(pt).toMatch(/Nunca espelhes a língua/);
+    expect(pt).toMatch(/Nunca passes a pt-BR a meio da chamada/);
+    expect(pt).toMatch(/language_hint enviesa o ASR/);
+    expect(pt).toMatch(/Escuta e responde \(prioridade máxima\)/);
+    expect(pt).toMatch(/último enunciado do destinatário/);
+    expect(pt).toMatch(/NUNCA leias, despejes, cites ou parafraseies o bloco Objetivo/);
+    expect(pt).toMatch(/Additional instructions/);
+    expect(pt).toMatch(/não despejes o objetivo/i);
+    expect(pt).toMatch(/uma ou duas frases curtas/);
+    expect(pt).not.toMatch(/British English/i);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: defaultGreeting("en-GB"),
+      objective: "Confirm a FedEx delivery",
+    });
+    expect(en).toMatch(/Listen and answer \(highest priority\)/);
+    expect(en).toMatch(/NEVER read out, dump, cite, or paraphrase the Objective/);
+    expect(en).toMatch(/do not dump the objective/i);
+    assertNoSpokenBranding(en);
   });
 
   it("instructs send_dtmf for IVR keypress menus", () => {

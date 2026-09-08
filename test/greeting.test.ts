@@ -288,6 +288,10 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     expect(looksLikeInstructionDump("Fala português de Portugal. Nunca uses brasileiroismos.")).toBe(
       true,
     );
+    expect(looksLikeInstructionDump("REGRA ABSOLUTA: portugues europeu. Tom humano, curto.")).toBe(
+      true,
+    );
+    expect(looksLikeInstructionDump("Proibido: celular, tela, ônibus.")).toBe(true);
     expect(looksLikeInstructionDump("Fala a secretária da Alfaseguros.")).toBe(false);
   });
 });
@@ -339,5 +343,64 @@ describe("composeSpokenGreeting call c2be0cd5 instruction dump", () => {
     expect(spoken).not.toMatch(/Fala português/i);
     expect(spoken).not.toMatch(/Tu LIGAS/i);
     expect(spoken).not.toMatch(/ROLEPLAY/i);
+  });
+});
+
+/**
+ * Call 28619c45: TRNSF stuffed voice-casting + anti-BR rules into `persona`
+ * and a FedEx brief into `objective`. Spoken greeting became
+ * «Boa tarde, sou a secretária. Ligo sobre mulher de Lisboa.»
+ */
+const CALL_28619C45_PERSONA =
+  "Mulher de Lisboa. Assistente do Andre Barreto. Tom humano, curto. REGRA ABSOLUTA: portugues europeu de Portugal. Proibido: celular, tela, ônibus, você. telemóvel nunca celular.";
+
+const CALL_28619C45_OBJECTIVE = `FedEx Portugal. REGRA ABSOLUTA: portugues europeu.
+Proibido: Oi, Tudo bem, celular.
+Ao atender: Boa tarde, sou a assistente do Andre Barreto. Ligo da FedEx sobre uma entrega em Lisboa.
+Nunca uses brasileiroismos. Tom humano.`;
+
+describe("composeSpokenGreeting call 28619c45 persona dump", () => {
+  it("does not speak Mulher de Lisboa, anti-BR lexicon, or Ligo sobre casting notes", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: CALL_28619C45_PERSONA,
+      objective: CALL_28619C45_OBJECTIVE,
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toMatch(/^Boa tarde, sou a assistente do Andre Barreto\./);
+    expect(spoken).not.toMatch(/mulher de lisboa/i);
+    expect(spoken).not.toMatch(/Ligo sobre mulher/i);
+    expect(spoken).not.toMatch(/REGRA ABSOLUTA/i);
+    expect(spoken).not.toMatch(/Tom humano/i);
+    expect(spoken).not.toMatch(/brasileir/i);
+    expect(spoken).not.toMatch(/celular/);
+    expect(spoken).not.toMatch(/ônibus/);
+    expect(spoken).not.toMatch(/Proibido/i);
+    expect(spoken.toLowerCase()).not.toContain("sou a secretária.");
+  });
+
+  it("prefers an explicit clean greeting over a persona dump", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: CALL_28619C45_PERSONA,
+      greeting: "Boa tarde, sou a assistente do Andre Barreto.",
+      objective: CALL_28619C45_OBJECTIVE,
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toMatch(/^Boa tarde, sou a assistente do Andre Barreto\./);
+    expect(spoken).not.toMatch(/mulher de lisboa/i);
+    expect(spoken).not.toMatch(/Ligo sobre mulher/i);
+  });
+
+  it("omits the ask when objective and persona are only casting/style notes", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "Mulher de Lisboa. Tom humano, curto. REGRA ABSOLUTA: portugues europeu.",
+      objective: "REGRA ABSOLUTA: nunca uses brasileiroismos. Proibido: celular. Tom humano.",
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toBe("Boa tarde, sou a secretária.");
+    expect(spoken).not.toMatch(/mulher de lisboa/i);
+    expect(spoken).not.toMatch(/Ligo sobre/i);
   });
 });

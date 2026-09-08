@@ -1,9 +1,11 @@
 import type { CallRecord, TranscriptLine } from "../calls/types.js";
-import type { JsonObject } from "../bridge/media-bridge.js";
 import {
   DEFAULT_HANGUP_MAX_WAIT_MS,
   DEFAULT_HANGUP_PLAYOUT_BUFFER_MS,
+  DEFAULT_WAIT_FOR_CALLEE_STALL_MS,
+  assistantTextFromResponse,
   pcmuPlayoutMsFromBase64,
+  type JsonObject,
 } from "../bridge/media-bridge.js";
 import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
@@ -98,6 +100,9 @@ export class OpenAIMediaBridge {
   private readonly responseDoneWaiters: Array<() => void> = [];
   private readonly handledToolCalls = new Set<string>();
   private closed = false;
+  private inboundMediaFrames = 0;
+  private waitForCalleeStallLogged = false;
+  private waitForCalleeNeverUnlockedLogged = false;
 
   constructor(opts: OpenAIMediaBridgeOptions) {
     this.call = opts.call;
@@ -230,9 +235,11 @@ export class OpenAIMediaBridge {
         const media = message.media as JsonObject | undefined;
         const payload = media?.payload;
         if (typeof payload === "string" && payload.length > 0) {
+          this.inboundMediaFrames += 1;
           this.sendOpenAI({ type: "input_audio_buffer.append", audio: payload });
         }
         this.maybeUnlockAfterGrace("media");
+        this.maybeLogWaitForCalleeStall();
         return;
       }
       case "stop":
@@ -292,6 +299,8 @@ export class OpenAIMediaBridge {
         if (waiting) {
           this.logCalleeGate(decision, "speech_stopped");
           if (decision.unlock) this.speakGreeting();
+        } else if (this.greetingSent) {
+          this.flushUserTranscript();
         }
         return;
       }
@@ -305,11 +314,12 @@ export class OpenAIMediaBridge {
           const decision = onTranscript(true, raw);
           this.logCalleeGate(decision, "transcript", raw);
           if (!decision.unlock) return;
-          if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+          this.storePendingUser(itemId, transcript);
           this.speakGreeting();
           return;
         }
-        if (itemId && transcript) this.pendingUser.set(itemId, transcript);
+        this.storePendingUser(itemId, transcript);
+        if (type.endsWith(".completed") && this.greetingSent) this.flushUserTranscript();
         return;
       }
       case "response.output_audio_transcript.done":
@@ -380,11 +390,15 @@ export class OpenAIMediaBridge {
 
   markEnded(reason: string): void {
     if (this.closed) {
+      this.flushUserTranscript();
+      this.logWaitForCalleeNeverUnlocked("hangup");
       this.onEnded?.(this.call);
       return;
     }
     this.closed = true;
     this.greetingGeneration += 1;
+    this.flushUserTranscript();
+    this.logWaitForCalleeNeverUnlocked("hangup");
     if (
       this.call.status === "completed" ||
       this.call.status === "failed" ||
@@ -397,8 +411,12 @@ export class OpenAIMediaBridge {
     this.call.status = reason === "error" ? "failed" : "completed";
     this.call.endedReason = this.call.endedReason ?? reason;
     this.call.endedAt = this.now();
-    this.flushUserTranscript();
     this.onEnded?.(this.call);
+  }
+
+  flushTranscript(): void {
+    this.flushUserTranscript();
+    this.logWaitForCalleeNeverUnlocked("hangup");
   }
 
   private markSessionReady(): void {
@@ -453,6 +471,7 @@ export class OpenAIMediaBridge {
     this.openaiResponsePending = true;
     this.suppressAssistantAudio = false;
     this.beginTurnAudio();
+    this.flushUserTranscript();
   }
 
   private onResponseDone(event: JsonObject): void {
@@ -463,6 +482,11 @@ export class OpenAIMediaBridge {
       this.flushResponseDoneWaiters();
       if (this.greetingPlaying || this.greetingSent) this.maybeFinishGreetingPlayback();
       return;
+    }
+    if (this.greetingSent && !this.isWaitingForCalleeSpeech()) {
+      this.flushUserTranscript();
+      const leftover = assistantTextFromResponse(event);
+      if (leftover) this.pushTranscript({ role: "assistant", text: leftover });
     }
     this.openaiResponsePending = false;
     this.turnAudio.done = true;
@@ -630,6 +654,33 @@ export class OpenAIMediaBridge {
     if (!decision.unlock) return;
     this.logCalleeGate(decision, event);
     this.speakGreeting();
+  }
+
+  private maybeLogWaitForCalleeStall(): void {
+    if (!this.isWaitingForCalleeSpeech() || this.waitForCalleeStallLogged) return;
+    if (this.inboundMediaFrames === 0) return;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    if (elapsed === undefined || elapsed < DEFAULT_WAIT_FOR_CALLEE_STALL_MS) return;
+    this.waitForCalleeStallLogged = true;
+    console.error(
+      `[openai-bridge ${this.call.id}] waitForCallee stall: inbound media flowing but greeting never unlocked after ${elapsed}ms (frames=${this.inboundMediaFrames}); agent stayed muted; not inventing speech`,
+    );
+  }
+
+  private logWaitForCalleeNeverUnlocked(phase: string): void {
+    if (!this.isWaitingForCalleeSpeech() || this.waitForCalleeNeverUnlockedLogged) return;
+    this.waitForCalleeNeverUnlockedLogged = true;
+    const elapsed = msSinceStreamStart(this.calleeGate, this.clockMs());
+    const elapsedLabel =
+      elapsed === undefined ? "stream not started" : `${elapsed}ms since stream start`;
+    console.error(
+      `[openai-bridge ${this.call.id}] waitForCallee never unlocked (${phase}): ${elapsedLabel}, inbound_media_frames=${this.inboundMediaFrames}, greetingSent=false; not inventing speech`,
+    );
+  }
+
+  private storePendingUser(itemId: string, transcript: string): void {
+    if (!transcript) return;
+    this.pendingUser.set(itemId || "anon", transcript);
   }
 
   private logCalleeGate(decision: CalleeSpeechDecision, event: string, transcript?: string): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grokRealtimeUrl, sessionUpdatePayload, GROK_REASONING_EFFORT, parseGrokVoice } from "../src/grok/session.js";
+import { grokRealtimeUrl, sessionUpdatePayload, GROK_REASONING_EFFORT, GROK_TRANSCRIBE_MODEL, parseGrokVoice } from "../src/grok/session.js";
 
 describe("Grok Voice Live 2 session", () => {
   it("targets the xAI realtime websocket with the configured model", () => {
@@ -22,6 +22,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.audio.output.speed).toBe(1.05);
     expect(payload.session.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.audio.input.transcription.language_hint).toBe("pt-PT");
+    expect(payload.session.audio.input.transcription.model).toBe(GROK_TRANSCRIBE_MODEL);
     expect(payload.session.instructions).toMatch(/português europeu/i);
     expect(payload.session.instructions).toMatch(/pt-BR/);
     expect(payload.session.instructions).toMatch(/NUNCA és o restaurante/);
@@ -74,6 +75,7 @@ describe("Grok Voice Live 2 session", () => {
     });
     expect(payload.session.voice).toBe("ara");
     expect(payload.session.audio.input.transcription.language_hint).toBe("en");
+    expect(payload.session.audio.input.transcription.model).toBe("grok-transcribe");
     expect(payload.session.instructions).toMatch(/British English/i);
     expect(payload.session.instructions).not.toMatch(/português europeu/i);
   });

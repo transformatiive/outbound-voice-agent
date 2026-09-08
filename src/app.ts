@@ -171,7 +171,11 @@ export function createApp(deps: AppDeps): CreatedApp {
     const wasTerminal = store.isTerminal(call);
     applyTelnyxEvent(call, envelope, () => new Date().toISOString());
     if (payload?.call_control_id) store.indexControlId(call, payload.call_control_id);
-    if (!wasTerminal && store.isTerminal(call)) onCallEnded(call);
+    if (!wasTerminal && store.isTerminal(call)) {
+      runtimes.get(call.id)?.bridge.flushTranscript();
+      openaiSessions.get(call.id)?.bridge.flushTranscript();
+      onCallEnded(call);
+    }
 
     res.status(200).json({ ok: true });
   });
