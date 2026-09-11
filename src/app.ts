@@ -110,7 +110,7 @@ export function createApp(deps: AppDeps): CreatedApp {
       model: deps.config.grokModel,
       from: deps.config.fromNumber,
       tts: {
-        default: "grok",
+        default: DEFAULT_TTS_PROVIDER,
         grokVoice: deps.config.grokVoice,
         elevenlabs: {
           configured: deps.config.elevenlabs.configured,

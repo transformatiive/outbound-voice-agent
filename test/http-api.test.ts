@@ -69,7 +69,7 @@ describe("HTTP API", () => {
     telnyx = mockTelnyx();
   });
 
-  it("GET /health is public and reports Grok ara + caller ID", async () => {
+  it("GET /health is public and reports tts.default gpt-live plus Grok ara caller ID", async () => {
     const { app } = createApp({ config, telnyx });
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
@@ -86,7 +86,7 @@ describe("HTTP API", () => {
     expect(res.body.ready.elevenlabs).toBe(false);
     expect(res.body.ready.openai).toBe(false);
     expect(res.body.tts).toEqual({
-      default: "grok",
+      default: "gpt-live",
       grokVoice: "ara",
       elevenlabs: {
         configured: false,
@@ -152,6 +152,7 @@ describe("HTTP API", () => {
         language: "en-GB",
         greeting: "Hello, this is the secretary.",
         objective: "Confirm Thursday at 4pm",
+        tts_provider: "grok",
       });
     expect(englishGb.status).toBe(201);
     expect(englishGb.body.language).toBe("en-GB");
@@ -163,6 +164,7 @@ describe("HTTP API", () => {
         to: "+351912345677",
         language: "en-US",
         objective: "Confirm Thursday at 4pm",
+        tts_provider: "grok",
       });
     expect(englishUs.status).toBe(201);
     expect(englishUs.body.language).toBe("en-US");
@@ -199,6 +201,7 @@ describe("HTTP API", () => {
         language: "pt-PT",
         greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação de quinta às 16h",
+        tts_provider: "grok",
       });
 
     expect(res.status).toBe(201);
@@ -233,6 +236,7 @@ describe("HTTP API", () => {
         to: "+351912345679",
         greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
+        tts_provider: "grok",
       });
     expect(omittedLang.status).toBe(201);
     expect(omittedLang.body.language).toBe("pt-PT");
@@ -261,6 +265,7 @@ describe("HTTP API", () => {
         greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
         waitForCallee: true,
+        tts_provider: "grok",
       });
     expect(explicit.status).toBe(201);
     expect(explicit.body.waitForCallee).toBe(true);
@@ -282,6 +287,7 @@ describe("HTTP API", () => {
         greeting: "Olá, fala a secretária.",
         objective: "Confirmar a marcação",
         instructions: "Wait silently until the callee speaks, then introduce yourself.",
+        tts_provider: "grok",
       });
     expect(inferred.status).toBe(201);
     expect(inferred.body.waitForCallee).toBe(true);
@@ -294,6 +300,7 @@ describe("HTTP API", () => {
         language: "pt-PT",
         greeting: "Olá",
         objective: "Confirmar",
+        tts_provider: "grok",
       });
     expect(omitted.status).toBe(201);
     expect(omitted.body.waitForCallee).toBe(false);
@@ -322,6 +329,7 @@ describe("HTTP API", () => {
         to: "+351912345682",
         language: "pt-PT",
         objective: "Confirmar a marcação",
+        tts_provider: "grok",
       });
     expect(omittedPt.status).toBe(201);
     const gotPt = await request(app)
@@ -340,6 +348,7 @@ describe("HTTP API", () => {
         language: "pt-PT",
         objective: "Confirmar a marcação",
         waitForCallee: true,
+        tts_provider: "grok",
       });
     expect(waitMissing.status).toBe(201);
     expect(waitMissing.body.waitForCallee).toBe(true);
@@ -365,6 +374,7 @@ describe("HTTP API", () => {
 # Objetivo
 Confirmar a consulta de otorrino na segunda às 10h.`,
         waitForCallee: true,
+        tts_provider: "grok",
       });
     expect(res.status).toBe(201);
     const got = await request(app)
@@ -611,8 +621,22 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(elDial?.webhook_url).toBe(grokDial?.webhook_url);
   });
 
-  it("defaults tts_provider grok and echoes roles on POST /api/outbound", async () => {
-    const { app } = createApp({ config, telnyx });
+  it("defaults omitted tts_provider to gpt-live and echoes roles on POST /api/outbound", async () => {
+    const { connectFakeGptLive } = await import("./helpers/fake-gpt-live-ws.js");
+    const withLive = {
+      ...config,
+      openai: {
+        ...config.openai,
+        apiKey: "sk-test",
+        configured: true,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+    const { app } = createApp({
+      config: withLive,
+      telnyx,
+      connectOpenAI: () => connectFakeGptLive() as unknown as import("ws").WebSocket,
+    });
     const res = await request(app)
       .post("/api/outbound")
       .set("Authorization", "Bearer test-api-key")
@@ -622,10 +646,12 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
         waitForCallee: true,
       });
     expect(res.status).toBe(201);
-    expect(res.body.ttsProvider).toBe("grok");
+    expect(res.body.ttsProvider).toBe("gpt-live");
     expect(res.body.botRole).toBe("caller_booking");
     expect(res.body.calleeRole).toBe("venue_staff");
-    expect(res.body.voice).toBe("ara");
+    expect(res.body.voice).toBe("marin");
+    expect(res.body.model).toBe("gpt-live-1");
+    expect(res.body.grokVoice).toBeUndefined();
   });
 
   it("returns 503 openai_not_configured when tts_provider is openai without OPENAI_API_KEY", async () => {
@@ -678,6 +704,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       voice: "marin",
       delegateModel: "gpt-5.6-terra",
     });
+    expect(res.body.tts.default).toBe("gpt-live");
     expect(res.body.ready.openai).toBe(true);
     expect(res.body.tts.openai.apiKey).toBeUndefined();
   });
@@ -898,8 +925,22 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(telnyx.dial).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 503 openai_not_configured when tts_provider is gpt-live without OPENAI_API_KEY", async () => {
+  it("returns 503 openai_not_configured when tts_provider is gpt-live or omitted without OPENAI_API_KEY", async () => {
     const { app } = createApp({ config, telnyx });
+    const omitted = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        waitForCallee: true,
+      });
+    expect(omitted.status).toBe(503);
+    expect(omitted.body.error).toBe("openai_not_configured");
+    expect(omitted.body.details).toMatch(/OPENAI_API_KEY/);
+    expect(omitted.body.details).toMatch(/gpt-live/);
+
     const res = await request(app)
       .post("/api/outbound")
       .set("Authorization", "Bearer test-api-key")

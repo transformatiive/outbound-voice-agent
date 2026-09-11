@@ -27,6 +27,7 @@ describe("GPT-Live session", () => {
     expect(payload.session.model).toBe(DEFAULT_GPT_LIVE_MODEL);
     expect(payload.session.audio.format).toEqual({ type: "audio/pcmu", rate: 8000 });
     expect(payload.session.audio.output.voice).toBe(DEFAULT_GPT_LIVE_VOICE);
+    expect(payload.session.audio.output).toEqual({ voice: DEFAULT_GPT_LIVE_VOICE });
     expect(GPT_LIVE_BRAZILIAN_VOICES).not.toContain(payload.session.audio.output.voice);
     expect(payload.session.instructions).toMatch(/português europeu/i);
     expect(payload.session.instructions).toMatch(/NUNCA português do Brasil/);

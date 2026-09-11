@@ -208,14 +208,19 @@ Confirmar a consulta de otorrino na segunda às 10h.
 });
 
 describe("parseOutboundBody persona, roles, tts_provider", () => {
-  it("defaults tts_provider grok, bot_role caller_booking, callee_role venue_staff", () => {
+  it("defaults tts_provider gpt-live when omitted, bot_role caller_booking, callee_role venue_staff", () => {
     const parsed = parseOutboundBody(base, { now: LISBON_AFTERNOON });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value.ttsProvider).toBe("grok");
+    expect(parsed.value.ttsProvider).toBe("gpt-live");
     expect(parsed.value.botRole).toBe("caller_booking");
     expect(parsed.value.calleeRole).toBe("venue_staff");
     expect(parsed.value.persona).toBeUndefined();
+
+    const empty = parseOutboundBody({ ...base, tts_provider: "" }, { now: LISBON_AFTERNOON });
+    expect(empty.ok).toBe(true);
+    if (!empty.ok) return;
+    expect(empty.value.ttsProvider).toBe("gpt-live");
   });
 
   it("uses persona for spoken identity composed with the objective", () => {
