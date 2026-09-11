@@ -69,6 +69,7 @@ describe("Telnyx webhooks", () => {
         language: "pt-PT",
         greeting: "Olá, fala a secretária.",
         objective: "Confirmar uma marcação",
+        tts_provider: "grok",
       });
     const id = created.body.id as string;
     const clientState = Buffer.from(id, "utf8").toString("base64");
@@ -160,6 +161,7 @@ describe("Telnyx webhooks", () => {
         language: "pt-PT",
         greeting: "Olá",
         objective: "Deixar um lembrete",
+        tts_provider: "grok",
       });
     const clientState = Buffer.from(created.body.id, "utf8").toString("base64");
     await request(app)
