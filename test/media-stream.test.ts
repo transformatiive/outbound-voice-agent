@@ -31,6 +31,9 @@ const config: AppConfig = {
     voice: "coral",
     configured: false,
     prewarmTimeoutMs: 2000,
+    liveModel: "gpt-live-1",
+    liveVoice: "marin",
+    delegateModel: "gpt-5.6-terra",
   },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
@@ -440,6 +443,9 @@ describe("media stream websocket", () => {
         voice: "coral",
         configured: true,
         prewarmTimeoutMs: 2000,
+        liveModel: "gpt-live-1",
+        liveVoice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
       ready: { ...config.ready, openai: true },
     };
@@ -634,6 +640,96 @@ describe("media stream websocket", () => {
     } finally {
       httpServer.close();
       grokWss.close();
+    }
+  });
+
+  it("plays pre-cached GPT-Live greeting to Telnyx only after waitForCallee unlock", async () => {
+    const { connectFakeGptLive, FakeGptLiveWebSocket } = await import("./helpers/fake-gpt-live-ws.js");
+    let fake: InstanceType<typeof FakeGptLiveWebSocket> | undefined;
+    const withLive: AppConfig = {
+      ...config,
+      openai: {
+        ...config.openai,
+        apiKey: "sk-test",
+        configured: true,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+
+    const telnyx: TelnyxClient = {
+      dial: vi.fn(async () => ({
+        call_control_id: "v2:control-id",
+        call_leg_id: "leg-id",
+        call_session_id: "session-id",
+        is_alive: false,
+        record_type: "call",
+      })),
+      hangup: vi.fn(async () => undefined),
+    };
+
+    const { app, store, attach } = createApp({
+      config: withLive,
+      telnyx,
+      connectOpenAI: () => {
+        fake = connectFakeGptLive();
+        return fake as unknown as WebSocket;
+      },
+    });
+    const httpServer = createServer(app);
+    attach(httpServer);
+    const port = await listen(httpServer);
+
+    try {
+      const created = await request(app)
+        .post("/api/outbound")
+        .set("Authorization", "Bearer test-api-key")
+        .send({
+          to: "+351912345678",
+          language: "pt-PT",
+          greeting: "Boa tarde, sou a secretária.",
+          objective: "Confirmar quinta",
+          tts_provider: "gpt-live",
+          waitForCallee: true,
+        });
+      expect(created.status).toBe(201);
+      const call = store.get(created.body.id as string);
+      if (!call) throw new Error("call missing");
+      expect(call.ttsProvider).toBe("gpt-live");
+      expect(call.model).toBe("gpt-live-1");
+      expect(fake).toBeDefined();
+      const start = fake?.sent.find((m: JsonObject) => m.type === "session.start");
+      const session = start?.session as JsonObject | undefined;
+      expect(session?.model).toBe("gpt-live-1");
+      expect((session?.audio as JsonObject | undefined)?.format).toEqual({ type: "audio/pcmu", rate: 8000 });
+      expect(fake?.sent.some((m: JsonObject) => m.type === "session.instructions.append")).toBe(true);
+
+      const telnyxFromLive: JsonObject[] = [];
+      const telnyxWs = new WebSocket(
+        `ws://127.0.0.1:${port}/media-stream?callId=${call.id}&token=${call.streamToken}`,
+      );
+      telnyxWs.on("message", (data) => {
+        telnyxFromLive.push(JSON.parse(String(data)) as JsonObject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        telnyxWs.once("open", () => resolve());
+        telnyxWs.once("error", reject);
+      });
+      await new Promise((r) => setTimeout(r, 40));
+      expect(telnyxFromLive.some((m) => m.event === "media")).toBe(false);
+
+      fake?.emit(
+        "message",
+        JSON.stringify({
+          type: "session.input_transcript.delta",
+          delta: "Estou",
+        }),
+      );
+      const media = await waitFor(telnyxFromLive, (m) => m.event === "media");
+      expect(media).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
+
+      telnyxWs.close();
+    } finally {
+      httpServer.close();
     }
   });
 });

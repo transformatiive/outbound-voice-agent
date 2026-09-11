@@ -1,9 +1,20 @@
-import type { OpenAIMediaBridge } from "./realtime-bridge.js";
 import type { WebSocket } from "ws";
+import type { CallRecord } from "../calls/types.js";
+import type { JsonObject } from "../bridge/media-bridge.js";
+
+export type OpenAIFamilyBridge = {
+  attachTelnyx(sendTelnyx: (event: JsonObject) => void): void;
+  setOnEnded(onEnded: (call: CallRecord) => void): void;
+  onTelnyxMessage(message: JsonObject): void;
+  waitUntilReady(timeoutMs: number): Promise<void>;
+  failSession(err: Error): void;
+  flushTranscript(): void;
+  requestHangup(reason: string): Promise<void>;
+};
 
 export type OpenAICallSession = {
   ws: WebSocket;
-  bridge: OpenAIMediaBridge;
+  bridge: OpenAIFamilyBridge;
   close: () => void;
 };
 

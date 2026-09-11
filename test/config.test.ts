@@ -55,6 +55,9 @@ describe("config", () => {
       voice: "coral",
       configured: false,
       prewarmTimeoutMs: 8000,
+      liveModel: "gpt-live-1",
+      liveVoice: "marin",
+      delegateModel: "gpt-5.6-terra",
     });
     expect(cfg.ready.openai).toBe(false);
     expect(openaiAudioPathActive(cfg.openai)).toBe(false);
@@ -218,6 +221,9 @@ describe("config", () => {
     expect(openaiAudioPathActive(withKey.openai)).toBe(true);
     expect(withKey.openai.voice).toBe("coral");
     expect(withKey.openai.model).toBe("gpt-realtime-2.1");
+    expect(withKey.openai.liveModel).toBe("gpt-live-1");
+    expect(withKey.openai.liveVoice).toBe("marin");
+    expect(withKey.openai.delegateModel).toBe("gpt-5.6-terra");
     expect(withKey.openai.baseUrl).toBe("https://api.openai.com");
     expect(withKey.grokVoice).toBe("ara");
 
@@ -238,6 +244,9 @@ describe("config", () => {
       voice: "marin",
       configured: true,
       prewarmTimeoutMs: 8000,
+      liveModel: "gpt-live-1",
+      liveVoice: "marin",
+      delegateModel: "gpt-5.6-terra",
     });
     expect(overridden.ready.openai).toBe(true);
     expect(overridden.grokVoice).toBe("ara");

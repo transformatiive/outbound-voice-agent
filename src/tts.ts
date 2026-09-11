@@ -1,4 +1,4 @@
-export const TTS_PROVIDERS = ["grok", "elevenlabs", "openai"] as const;
+export const TTS_PROVIDERS = ["grok", "elevenlabs", "openai", "gpt-live"] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
@@ -27,6 +27,16 @@ export const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1";
 export const DEFAULT_OPENAI_VOICE = "coral";
 export const DEFAULT_OPENAI_BASE = "https://api.openai.com";
 export const DEFAULT_OPENAI_PREWARM_TIMEOUT_MS = 8000;
+/** ChatGPT Voice speech-to-speech model (`tts_provider=gpt-live` / aliases chatgpt-live-1). */
+export const DEFAULT_GPT_LIVE_MODEL = "gpt-live-1";
+/**
+ * GPT-Live quality default. Multilingual — pt-PT is locked in instructions.
+ * Do **not** default to `bossa` / `tempo` (Brazilian Portuguese voices).
+ */
+export const DEFAULT_GPT_LIVE_VOICE = "marin";
+/** Responses-delegation reasoning model for GPT-Live tools (`end_call`, `send_dtmf`). */
+export const DEFAULT_GPT_LIVE_DELEGATE_MODEL = "gpt-5.6-terra";
+export const GPT_LIVE_USER_AGENT = "alfaseguros/outbound-voice-agent Node";
 
 export type ElevenLabsConfig = {
   apiKey: string;
@@ -45,6 +55,12 @@ export type OpenAIConfig = {
   voice: string;
   configured: boolean;
   prewarmTimeoutMs: number;
+  /** `gpt-live-1` (ChatGPT Voice). */
+  liveModel: string;
+  /** Default GPT-Live voice (`marin`). Not `bossa`/`tempo` (Brazilian). */
+  liveVoice: string;
+  /** Responses backend for GPT-Live tool calls. */
+  delegateModel: string;
 };
 
 export function parseTtsProvider(value: unknown): { ok: true; value: TtsProvider } | { ok: false } {
@@ -60,8 +76,45 @@ export function parseTtsProvider(value: unknown): { ok: true; value: TtsProvider
       return { ok: true, value: "elevenlabs" };
     case "openai":
       return { ok: true, value: "openai" };
+    case "gpt-live":
+    case "gpt-live-1":
+    case "chatgpt-live":
+    case "chatgpt-live-1":
+      return { ok: true, value: "gpt-live" };
     default: {
       return { ok: false };
+    }
+  }
+}
+
+/** Prewarmed OpenAI WebSocket owns Telnyx speech-to-speech (Realtime or GPT-Live). */
+export function ttsProviderUsesOpenAISession(provider: TtsProvider): boolean {
+  switch (provider) {
+    case "openai":
+    case "gpt-live":
+      return true;
+    case "grok":
+    case "elevenlabs":
+      return false;
+    default: {
+      const _never: never = provider;
+      throw new Error(`unsupported tts provider: ${_never}`);
+    }
+  }
+}
+
+/** Public `grokVoice` echo — Grok still speaks or still does STT. */
+export function ttsProviderUsesGrokVoice(provider: TtsProvider): boolean {
+  switch (provider) {
+    case "grok":
+    case "elevenlabs":
+      return true;
+    case "openai":
+    case "gpt-live":
+      return false;
+    default: {
+      const _never: never = provider;
+      throw new Error(`unsupported tts provider: ${_never}`);
     }
   }
 }
@@ -121,6 +174,9 @@ export function openaiConfigFromEnv(env: Record<string, string | undefined>): Op
   const baseUrl = (env.OPENAI_BASE?.trim() || DEFAULT_OPENAI_BASE).replace(/\/+$/, "");
   const model = env.OPENAI_REALTIME_MODEL?.trim() || DEFAULT_OPENAI_REALTIME_MODEL;
   const voice = env.OPENAI_VOICE?.trim().toLowerCase() || DEFAULT_OPENAI_VOICE;
+  const liveModel = env.OPENAI_LIVE_MODEL?.trim() || DEFAULT_GPT_LIVE_MODEL;
+  const liveVoice = env.OPENAI_LIVE_VOICE?.trim().toLowerCase() || DEFAULT_GPT_LIVE_VOICE;
+  const delegateModel = env.OPENAI_LIVE_DELEGATE_MODEL?.trim() || DEFAULT_GPT_LIVE_DELEGATE_MODEL;
   return {
     apiKey,
     baseUrl,
@@ -128,6 +184,9 @@ export function openaiConfigFromEnv(env: Record<string, string | undefined>): Op
     voice,
     configured: Boolean(apiKey),
     prewarmTimeoutMs: DEFAULT_OPENAI_PREWARM_TIMEOUT_MS,
+    liveModel,
+    liveVoice,
+    delegateModel,
   };
 }
 

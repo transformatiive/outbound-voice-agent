@@ -14,6 +14,7 @@ import {
   onSpeechStopped,
   onTranscript,
   onOngoingSpeechCheck,
+  pcmuPayloadLooksLikeSpeech,
 } from "../src/bridge/callee-speech.js";
 
 const config = {
@@ -236,5 +237,13 @@ describe("callee speech gate (waitForCallee)", () => {
       unlock: true,
       reason: "short_answer",
     });
+  });
+
+  it("treats non-silence μ-law frames as speech for GPT-Live (no VAD event)", () => {
+    const silence = Buffer.alloc(160, 0xff).toString("base64");
+    const speech = Buffer.alloc(160, 0x20).toString("base64");
+    expect(pcmuPayloadLooksLikeSpeech(silence)).toBe(false);
+    expect(pcmuPayloadLooksLikeSpeech(speech)).toBe(true);
+    expect(pcmuPayloadLooksLikeSpeech("")).toBe(false);
   });
 });

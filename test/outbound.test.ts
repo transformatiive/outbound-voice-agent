@@ -289,7 +289,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.value.persona).toBe(persona);
   });
 
-  it("accepts tts_provider grok | elevenlabs | openai and rejects other values", () => {
+  it("accepts tts_provider grok | elevenlabs | openai | gpt-live and rejects other values", () => {
     const grok = parseOutboundBody({ ...base, tts_provider: "grok" });
     expect(grok.ok).toBe(true);
     if (!grok.ok) return;
@@ -313,6 +313,24 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(labs.value.botRole).toBe(grok.value.botRole);
     expect(openai.value.calleeRole).toBe(grok.value.calleeRole);
     expect(labs.value.waitForCallee).toBe(grok.value.waitForCallee);
+
+    const gptLive = parseOutboundBody({ ...base, tts_provider: "chatgpt-live-1", openai_voice: "marin" });
+    expect(gptLive.ok).toBe(true);
+    if (!gptLive.ok) return;
+    expect(gptLive.value.ttsProvider).toBe("gpt-live");
+    expect(gptLive.value.openaiVoice).toBe("marin");
+    expect(gptLive.value.language).toBe(grok.value.language);
+
+    const alias = parseOutboundBody({ ...base, tts_provider: "gpt-live", gpt_live_voice: "coral" });
+    expect(alias.ok).toBe(true);
+    if (!alias.ok) return;
+    expect(alias.value.ttsProvider).toBe("gpt-live");
+    expect(alias.value.openaiVoice).toBe("coral");
+
+    const badLiveVoice = parseOutboundBody({ ...base, tts_provider: "gpt-live", gpt_live_voice: "robot" });
+    expect(badLiveVoice.ok).toBe(false);
+    if (badLiveVoice.ok) return;
+    expect(badLiveVoice.error).toMatchObject({ status: 400, error: "invalid_gpt_live_voice" });
 
     const bad = parseOutboundBody({ ...base, tts_provider: "amazon" });
     expect(bad.ok).toBe(false);

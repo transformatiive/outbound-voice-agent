@@ -31,6 +31,9 @@ const config: AppConfig = {
     voice: "coral",
     configured: false,
     prewarmTimeoutMs: 2000,
+    liveModel: "gpt-live-1",
+    liveVoice: "marin",
+    delegateModel: "gpt-5.6-terra",
   },
   turnDetection: DEFAULT_TURN_DETECTION,
   calleeSpeechGraceMs: 1000,
@@ -101,6 +104,13 @@ describe("HTTP API", () => {
         audioPathActive: false,
         model: "gpt-realtime-2.1",
         voice: "coral",
+      },
+      gptLive: {
+        configured: false,
+        audioPathActive: false,
+        model: "gpt-live-1",
+        voice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
     });
     expect(res.body.tts.elevenlabs.apiKey).toBeUndefined();
@@ -646,6 +656,9 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
         voice: "coral",
         configured: true,
         prewarmTimeoutMs: 2000,
+        liveModel: "gpt-live-1",
+        liveVoice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
       ready: { ...config.ready, openai: true },
     };
@@ -657,6 +670,13 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       audioPathActive: true,
       model: "gpt-realtime-2.1",
       voice: "coral",
+    });
+    expect(res.body.tts.gptLive).toEqual({
+      configured: true,
+      audioPathActive: true,
+      model: "gpt-live-1",
+      voice: "marin",
+      delegateModel: "gpt-5.6-terra",
     });
     expect(res.body.ready.openai).toBe(true);
     expect(res.body.tts.openai.apiKey).toBeUndefined();
@@ -673,6 +693,9 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
         voice: "coral",
         configured: true,
         prewarmTimeoutMs: 2000,
+        liveModel: "gpt-live-1",
+        liveVoice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
       ready: { ...config.ready, openai: true },
     };
@@ -723,6 +746,9 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
         voice: "coral",
         configured: true,
         prewarmTimeoutMs: 50,
+        liveModel: "gpt-live-1",
+        liveVoice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
       ready: { ...config.ready, openai: true },
     };
@@ -776,6 +802,9 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
         voice: "coral",
         configured: true,
         prewarmTimeoutMs: 2000,
+        liveModel: "gpt-live-1",
+        liveVoice: "marin",
+        delegateModel: "gpt-5.6-terra",
       },
       ready: { ...config.ready, elevenlabs: true, openai: true },
     };
@@ -867,5 +896,68 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(bad.status).toBe(400);
     expect(bad.body.error).toBe("invalid_grok_voice");
     expect(telnyx.dial).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 503 openai_not_configured when tts_provider is gpt-live without OPENAI_API_KEY", async () => {
+    const { app } = createApp({ config, telnyx });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "chatgpt-live-1",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("openai_not_configured");
+    expect(res.body.details).toMatch(/OPENAI_API_KEY/);
+    expect(telnyx.dial).not.toHaveBeenCalled();
+  });
+
+  it("accepts tts_provider=gpt-live when configured and echoes gpt-live-1 / marin, not ara", async () => {
+    const { connectFakeGptLive } = await import("./helpers/fake-gpt-live-ws.js");
+    const withLive = {
+      ...config,
+      openai: {
+        ...config.openai,
+        apiKey: "sk-test",
+        configured: true,
+      },
+      ready: { ...config.ready, openai: true },
+    };
+    const { app } = createApp({
+      config: withLive,
+      telnyx,
+      connectOpenAI: () => connectFakeGptLive() as unknown as import("ws").WebSocket,
+    });
+    const res = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        persona: "secretária da empresa",
+        objective: "Reservar uma mesa para quinta.",
+        tts_provider: "chatgpt-live-1",
+        waitForCallee: true,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.ttsProvider).toBe("gpt-live");
+    expect(res.body.voice).toBe("marin");
+    expect(res.body.model).toBe("gpt-live-1");
+    expect(res.body.language).toBe("pt-PT");
+    expect(res.body.grokVoice).toBeUndefined();
+    expect(telnyx.dial).toHaveBeenCalledTimes(1);
+
+    const got = await request(app)
+      .get(`/api/calls/${res.body.id}`)
+      .set("Authorization", "Bearer test-api-key");
+    expect(got.body.ttsProvider).toBe("gpt-live");
+    expect(got.body.voice).toBe("marin");
+    expect(got.body.model).toBe("gpt-live-1");
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
+    expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 });

@@ -20,6 +20,7 @@ import {
   RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
   elevenLabsAudioPathActive,
   openaiAudioPathActive,
+  ttsProviderUsesGrokVoice,
 } from "./tts.js";
 import { attachMediaStream } from "./bridge/media-stream.js";
 import { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
@@ -128,6 +129,13 @@ export function createApp(deps: AppDeps): CreatedApp {
           model: deps.config.openai.model,
           voice: deps.config.openai.voice,
         },
+        gptLive: {
+          configured: deps.config.openai.configured,
+          audioPathActive: openaiAudioPathActive(deps.config.openai),
+          model: deps.config.openai.liveModel,
+          voice: deps.config.openai.liveVoice,
+          delegateModel: deps.config.openai.delegateModel,
+        },
       },
       telnyx: {
         connectionId: deps.config.telnyxConnectionId,
@@ -219,7 +227,9 @@ export function createApp(deps: AppDeps): CreatedApp {
       calleeRole: result.call.calleeRole ?? DEFAULT_CALLEE_ROLE,
       ivr: result.call.ivr === true,
       createdAt: result.call.createdAt,
-      ...(result.call.ttsProvider !== "openai" ? { grokVoice: result.call.voice } : {}),
+      ...(ttsProviderUsesGrokVoice(result.call.ttsProvider ?? DEFAULT_TTS_PROVIDER)
+        ? { grokVoice: result.call.voice }
+        : {}),
     });
   });
 
