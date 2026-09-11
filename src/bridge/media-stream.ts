@@ -11,6 +11,7 @@ import { CallRuntime, type CallRuntimeRegistry, type ConnectGrokFn } from "./cal
 import type { CallRecord } from "../calls/types.js";
 import type { OpenAISessionStore } from "../openai/sessions.js";
 import type { JsonObject } from "./media-bridge.js";
+import { ttsProviderUsesOpenAISession } from "../tts.js";
 
 export type MediaStreamDeps = {
   config: AppConfig;
@@ -49,7 +50,7 @@ function handleMediaConnection(telnyxWs: WebSocket, url: URL, deps: MediaStreamD
     return;
   }
 
-  if (call.ttsProvider === "openai") {
+  if (call.ttsProvider && ttsProviderUsesOpenAISession(call.ttsProvider)) {
     handleOpenAIMediaConnection(telnyxWs, call, deps);
     return;
   }
@@ -86,7 +87,7 @@ function handleOpenAIMediaConnection(
   const session = deps.openaiSessions?.take(call.id);
   if (!session) {
     console.error(
-      `[media ${call.id}] tts_provider=openai but Realtime session is missing; not falling back to Grok ara`,
+      `[media ${call.id}] tts_provider=${call.ttsProvider} but OpenAI session is missing; not falling back to Grok ara`,
     );
     telnyxWs.close(1011, "openai_session_missing");
     if (call.telnyx.callControlId) {

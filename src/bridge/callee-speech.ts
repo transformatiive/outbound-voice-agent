@@ -240,3 +240,18 @@ function inGrace(gate: CalleeSpeechGate, atMs: number, graceMs: number): boolean
   if (gate.streamStartedAtMs === undefined) return true;
   return atMs - gate.streamStartedAtMs < graceMs;
 }
+
+/**
+ * GPT-Live has no `speech_started` VAD event. G.711 μ-law silence is typically
+ * 0xFF / 0x7F; a 20ms Telnyx frame with enough non-silence counts as speech.
+ */
+export function pcmuPayloadLooksLikeSpeech(base64: string): boolean {
+  if (!base64) return false;
+  const bytes = Buffer.from(base64, "base64");
+  if (bytes.length < 80) return false;
+  let loud = 0;
+  for (const b of bytes) {
+    if (b !== 0xff && b !== 0x7f) loud += 1;
+  }
+  return loud > bytes.length * 0.25;
+}

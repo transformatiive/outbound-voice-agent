@@ -75,7 +75,7 @@ export type OpenAIGreetingResponseCreate = {
   };
 };
 
-const END_CALL_TOOL: OpenAIFunctionTool = {
+export const END_CALL_TOOL: OpenAIFunctionTool = {
   type: "function",
   name: "end_call",
   description: END_CALL_TOOL_DESCRIPTION,

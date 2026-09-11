@@ -4,8 +4,13 @@ import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./gree
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
 import { parseOpenAIVoice } from "./openai/session.js";
+import { GPT_LIVE_VOICE_LIST, parseGptLiveVoice } from "./openai/live-session.js";
 import { GROK_VOICE_LIST, parseGrokVoice } from "./grok/session.js";
-import { parseTtsProvider, type TtsProvider } from "./tts.js";
+import {
+  parseTtsProvider,
+  ttsProviderUsesOpenAISession,
+  type TtsProvider,
+} from "./tts.js";
 import { createElevenLabsTts } from "./elevenlabs.js";
 import type { GreetingAudioCache } from "./bridge/greeting-audio-cache.js";
 import type { ElevenLabsTts } from "./elevenlabs.js";
@@ -13,6 +18,7 @@ import type { CallRecord } from "./calls/types.js";
 import type { TelnyxClient } from "./telnyx/client.js";
 import { CallStore } from "./calls/store.js";
 import { OpenAISessionError, prewarmOpenAISession, type ConnectOpenAI } from "./openai/prewarm.js";
+import { prewarmGptLiveSession } from "./openai/live-prewarm.js";
 import type { OpenAISessionStore } from "./openai/sessions.js";
 
 const E164 = /^\+[1-9]\d{7,14}$/;
@@ -34,6 +40,7 @@ export type OutboundBody = {
   bot_role?: unknown;
   callee_role?: unknown;
   openai_voice?: unknown;
+  gpt_live_voice?: unknown;
   grok_voice?: unknown;
   ivr?: unknown;
 };
@@ -87,7 +94,11 @@ export function parseOutboundBody(
   if (!ttsProviderParsed.ok) {
     return {
       ok: false,
-      error: { status: 400, error: "invalid_tts_provider", details: "tts_provider must be grok | elevenlabs | openai" },
+      error: {
+        status: 400,
+        error: "invalid_tts_provider",
+        details: "tts_provider must be grok | elevenlabs | openai | gpt-live",
+      },
     };
   }
   const botRoleParsed = parseRoleLabel(body.bot_role, DEFAULT_BOT_ROLE);
@@ -112,6 +123,25 @@ export function parseOutboundBody(
       };
     }
     if (body.openai_voice !== undefined && body.openai_voice !== null && body.openai_voice !== "") {
+      openaiVoice = voiceParsed.value;
+    }
+  } else if (ttsProviderParsed.value === "gpt-live") {
+    const liveVoiceRaw =
+      body.gpt_live_voice !== undefined && body.gpt_live_voice !== null && body.gpt_live_voice !== ""
+        ? body.gpt_live_voice
+        : body.openai_voice;
+    const voiceParsed = parseGptLiveVoice(liveVoiceRaw);
+    if (!voiceParsed.ok) {
+      return {
+        ok: false,
+        error: {
+          status: 400,
+          error: "invalid_gpt_live_voice",
+          details: `gpt_live_voice / openai_voice must be ${GPT_LIVE_VOICE_LIST}`,
+        },
+      };
+    }
+    if (liveVoiceRaw !== undefined && liveVoiceRaw !== null && liveVoiceRaw !== "") {
       openaiVoice = voiceParsed.value;
     }
   }
@@ -241,12 +271,12 @@ export async function placeOutboundCall(opts: {
       },
     };
   }
-  if (parsed.value.ttsProvider === "openai" && !opts.config.openai.configured) {
+  if (ttsProviderUsesOpenAISession(parsed.value.ttsProvider) && !opts.config.openai.configured) {
     return {
       error: {
         status: 503,
         error: "openai_not_configured",
-        details: "OPENAI_API_KEY is required for tts_provider=openai (set on Railway)",
+        details: `OPENAI_API_KEY is required for tts_provider=${parsed.value.ttsProvider} (set on Railway)`,
       },
     };
   }
@@ -260,16 +290,17 @@ export async function placeOutboundCall(opts: {
       `[outbound] tts_provider=openai; Telnyx speech-to-speech is OpenAI Realtime ${opts.config.openai.model} voice ${parsed.value.openaiVoice ?? opts.config.openai.voice}`,
     );
   }
+  if (parsed.value.ttsProvider === "gpt-live") {
+    console.info(
+      `[outbound] tts_provider=gpt-live; Telnyx speech-to-speech is GPT-Live ${opts.config.openai.liveModel} voice ${parsed.value.openaiVoice ?? opts.config.openai.liveVoice} (pt-PT lock in instructions)`,
+    );
+  }
 
-  const spokenVoice =
-    parsed.value.ttsProvider === "openai"
-      ? parsed.value.openaiVoice ?? opts.config.openai.voice
-      : parsed.value.grokVoice ?? opts.config.grokVoice;
+  const spokenVoice = spokenVoiceFor(parsed.value, opts.config);
   if (parsed.value.ttsProvider === "grok") {
     console.info(`[outbound] tts_provider=grok; Telnyx voice is Grok ${spokenVoice}`);
   }
-  const model =
-    parsed.value.ttsProvider === "openai" ? opts.config.openai.model : opts.config.grokModel;
+  const model = modelFor(parsed.value.ttsProvider, opts.config);
 
   const id = randomUUID();
   const streamToken = randomBytes(24).toString("base64url");
@@ -320,12 +351,31 @@ export async function placeOutboundCall(opts: {
         },
       };
     }
+  } else if (parsed.value.ttsProvider === "gpt-live") {
+    try {
+      openaiSession = await prewarmGptLiveSession({
+        call,
+        config: opts.config,
+        telnyx: opts.telnyx,
+        ...(opts.connectOpenAI ? { connectOpenAI: opts.connectOpenAI } : {}),
+        ...(opts.onCallEnded ? { onEnded: opts.onCallEnded } : {}),
+      });
+    } catch (err) {
+      const sessionErr = err instanceof OpenAISessionError ? err : undefined;
+      return {
+        error: {
+          status: 503,
+          error: sessionErr?.code ?? "gpt_live_session_failed",
+          details: err instanceof Error ? err.message : String(err),
+        },
+      };
+    }
   }
 
   opts.store.create(call);
   if (openaiSession && opts.openaiSessions) {
     opts.openaiSessions.set(call.id, openaiSession);
-  } else if (parsed.value.ttsProvider !== "openai") {
+  } else if (!ttsProviderUsesOpenAISession(parsed.value.ttsProvider)) {
     opts.onCallCreated?.(call);
   }
 
@@ -375,5 +425,44 @@ export async function placeOutboundCall(opts: {
     call.endedAt = new Date().toISOString();
     call.error = err instanceof Error ? err.message : String(err);
     return { error: { status: 502, error: "telnyx_dial_failed", details: call.error } };
+  }
+}
+
+function spokenVoiceFor(
+  parsed: {
+    ttsProvider: TtsProvider;
+    openaiVoice?: string;
+    grokVoice?: string;
+  },
+  config: AppConfig,
+): string {
+  switch (parsed.ttsProvider) {
+    case "openai":
+      return parsed.openaiVoice ?? config.openai.voice;
+    case "gpt-live":
+      return parsed.openaiVoice ?? config.openai.liveVoice;
+    case "grok":
+    case "elevenlabs":
+      return parsed.grokVoice ?? config.grokVoice;
+    default: {
+      const _never: never = parsed.ttsProvider;
+      throw new Error(`unsupported tts provider: ${_never}`);
+    }
+  }
+}
+
+function modelFor(provider: TtsProvider, config: AppConfig): string {
+  switch (provider) {
+    case "openai":
+      return config.openai.model;
+    case "gpt-live":
+      return config.openai.liveModel;
+    case "grok":
+    case "elevenlabs":
+      return config.grokModel;
+    default: {
+      const _never: never = provider;
+      throw new Error(`unsupported tts provider: ${_never}`);
+    }
   }
 }

@@ -1,6 +1,6 @@
 import type { Language } from "../prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
-import { DEFAULT_TTS_PROVIDER, type TtsProvider } from "../tts.js";
+import { DEFAULT_TTS_PROVIDER, ttsProviderUsesGrokVoice, type TtsProvider } from "../tts.js";
 
 export type CallStatus =
   | "dialing"
@@ -104,6 +104,8 @@ export function toPublicCall(call: CallRecord): PublicCall {
     ...(call.endedAt !== undefined ? { endedAt: call.endedAt } : {}),
     ...(call.error !== undefined ? { error: call.error } : {}),
     ...(call.persona !== undefined ? { persona: call.persona } : {}),
-    ...(call.ttsProvider !== "openai" ? { grokVoice: call.voice } : {}),
+    ...(ttsProviderUsesGrokVoice(call.ttsProvider ?? DEFAULT_TTS_PROVIDER)
+      ? { grokVoice: call.voice }
+      : {}),
   };
 }

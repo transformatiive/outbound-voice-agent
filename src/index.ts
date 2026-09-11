@@ -14,6 +14,6 @@ attach(server);
 
 server.listen(config.port, () => {
   console.log(
-    `outbound-voice-agent on :${config.port} (Grok ${config.grokModel} voice ${config.grokVoice}; OpenAI ${config.openai.model} voice ${config.openai.voice} configured=${config.openai.configured}; from ${config.fromNumber}, outbound ready=${config.ready.outbound})`,
+    `outbound-voice-agent on :${config.port} (Grok ${config.grokModel} voice ${config.grokVoice}; OpenAI Realtime ${config.openai.model} voice ${config.openai.voice}; GPT-Live ${config.openai.liveModel} voice ${config.openai.liveVoice} configured=${config.openai.configured}; from ${config.fromNumber}, outbound ready=${config.ready.outbound})`,
   );
 });
