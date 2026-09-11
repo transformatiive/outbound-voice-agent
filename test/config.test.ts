@@ -5,6 +5,9 @@ import {
   DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY,
   DEFAULT_ELEVENLABS_VAD_SILENCE_MS,
   DEFAULT_ELEVENLABS_VOICE_ID,
+  DEFAULT_GPT_LIVE_MODEL,
+  DEFAULT_GPT_LIVE_VOICE,
+  DEFAULT_TTS_PROVIDER,
   RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
   RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
   elevenLabsAudioPathActive,
@@ -61,6 +64,9 @@ describe("config", () => {
     });
     expect(cfg.ready.openai).toBe(false);
     expect(openaiAudioPathActive(cfg.openai)).toBe(false);
+    expect(DEFAULT_TTS_PROVIDER).toBe("gpt-live");
+    expect(DEFAULT_GPT_LIVE_MODEL).toBe("gpt-live-1");
+    expect(DEFAULT_GPT_LIVE_VOICE).toBe("marin");
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toBe("NkpT2jezTenCDRKHkWiX");
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toContain("Ten");
     expect(DEFAULT_ELEVENLABS_VOICE_ID).not.toContain("TnC");

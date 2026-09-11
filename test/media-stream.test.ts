@@ -117,6 +117,7 @@ describe("media stream websocket", () => {
           language: "pt-PT",
           greeting: "Olá, fala a secretária.",
           objective: "Confirmar quinta",
+          tts_provider: "grok",
         });
       const call = store.get(created.body.id as string);
       if (!call) throw new Error("call missing");
@@ -215,6 +216,7 @@ describe("media stream websocket", () => {
           greeting: "Olá, fala a secretária.",
           objective: "Confirmar quinta",
           waitForCallee: true,
+          tts_provider: "grok",
         });
       const call = store.get(created.body.id as string);
       if (!call) throw new Error("call missing");

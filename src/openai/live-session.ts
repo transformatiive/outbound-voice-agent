@@ -48,6 +48,7 @@ export type GptLiveSessionStart = {
     instructions: string;
     audio: {
       format: GptLiveAudioFormat;
+      /** Voice only — GPT-Live has no `speed` field; playback is natural 1.0. */
       output: { voice: string };
     };
     delegation: {
@@ -227,6 +228,7 @@ export function gptLiveSessionStartPayload(input: {
       }),
       audio: {
         format: { type: "audio/pcmu", rate: 8000 },
+        // Live has no playback-rate knob; omit speed so the API uses natural 1.0.
         output: { voice },
       },
       delegation: {

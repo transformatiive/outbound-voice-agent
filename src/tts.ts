@@ -1,7 +1,7 @@
 export const TTS_PROVIDERS = ["grok", "elevenlabs", "openai", "gpt-live"] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
-export const DEFAULT_TTS_PROVIDER: TtsProvider = "grok";
+export const DEFAULT_TTS_PROVIDER: TtsProvider = "gpt-live";
 export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
 /**
  * Benedita - PT-PT (Alfa teste). 20-char voice id.
