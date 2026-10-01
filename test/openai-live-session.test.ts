@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_GPT_LIVE_OUTPUT_SPEED,
   GPT_LIVE_BRAZILIAN_VOICES,
   buildGptLiveBackendInstructions,
   buildGptLiveInstructions,
@@ -29,12 +28,9 @@ describe("GPT-Live session", () => {
     expect(payload.session.model).toBe(DEFAULT_GPT_LIVE_MODEL);
     expect(payload.session.audio.format).toEqual({ type: "audio/pcmu", rate: 8000 });
     expect(payload.session.audio.output.voice).toBe(DEFAULT_GPT_LIVE_VOICE);
-    expect(payload.session.audio.output).toEqual({
-      voice: DEFAULT_GPT_LIVE_VOICE,
-      speed: DEFAULT_GPT_LIVE_OUTPUT_SPEED,
-    });
-    expect(payload.session.audio.output.speed).toBe(1);
-    expect(payload.session.audio.output.speed).toBeLessThan(1.05);
+    expect(payload.session.audio.output).toEqual({ voice: DEFAULT_GPT_LIVE_VOICE });
+    expect(payload.session.audio.output).not.toHaveProperty("speed");
+    expect(JSON.stringify(payload.session.audio)).not.toMatch(/"speed"/);
     expect(payload.session.instructions).toMatch(/ChatGPT Voice/);
     expect(payload.session.instructions).toMatch(/«hmm»/);
     expect(payload.session.instructions).toMatch(/IVR/);
@@ -82,7 +78,7 @@ describe("GPT-Live session", () => {
     expect(gptLiveGreetingSpeakInstructions("pt-PT", "Boa tarde.")).toMatch(/português europeu/i);
   });
 
-  it("keeps ChatGPT Voice delivery in session.instructions only — no persona field, speed 1.0", () => {
+  it("keeps ChatGPT Voice delivery in session.instructions only — no persona field, no audio.output.speed", () => {
     const expressive = gptLiveExpressiveVoiceInstructions("pt-PT");
     expect(expressive).toMatch(/«hmm»/);
     expect(expressive).toMatch(/«certo»/);
@@ -99,11 +95,9 @@ describe("GPT-Live session", () => {
     expect(payload.session.instructions).toContain(expressive);
     expect(payload.session).not.toHaveProperty("persona");
     expect(JSON.stringify(payload)).not.toMatch(/"persona"/);
-    expect(payload.session.audio.output).toEqual({
-      voice: DEFAULT_GPT_LIVE_VOICE,
-      speed: 1,
-    });
-    expect(payload.session.audio.output.speed).not.toBe(1.05);
+    expect(payload.session.audio.output).toEqual({ voice: DEFAULT_GPT_LIVE_VOICE });
+    expect(payload.session.audio.output).not.toHaveProperty("speed");
+    expect(JSON.stringify(payload.session.audio.output)).not.toMatch(/speed/);
     expect(payload.session.delegation.responses.instructions).not.toContain(expressive);
   });
 
