@@ -32,6 +32,7 @@ describe("GPT-Live media bridge", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
     bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
     await bridge.onLiveEvent({ type: "session.started", session: { id: "s1" } });
     expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.instructions.append")).toBe(true);
     expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.commentary.append")).toBe(true);
@@ -109,6 +110,7 @@ describe("GPT-Live media bridge", () => {
       postOpeningPauseMs: 0,
     });
     bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
     await bridge.onLiveEvent({ type: "session.started" });
     const first = liveSend.mock.calls.find((c) => c[0]?.type === "session.instructions.append")?.[0] as {
       content: string;
@@ -354,5 +356,71 @@ describe("GPT-Live media bridge", () => {
     expect(call.endedReason).toBeUndefined();
     expect(telnyxSend).toHaveBeenCalledWith({ event: "clear" });
     expect(liveSend).toHaveBeenCalledWith({ type: "response.create" });
+  });
+
+  it("does not flush waitForCallee=false greeting PCMU until Telnyx start (prewarm / attach race)", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = {
+      ...sampleCall(),
+      greeting: "Boa tarde. Sou a secretária do Nuno. Queria marcar um jantar na Capricciosa.",
+    };
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+    });
+
+    await bridge.onLiveEvent({ type: "session.started" });
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "T1BFTg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    const introInstruct = liveSend.mock.calls
+      .filter((c) => c[0]?.type === "session.instructions.append")
+      .at(-1)?.[0] as { content: string };
+    expect(introInstruct.content).toContain("Sou a secretária do Nuno");
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "SU5UUg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(call.transcript).toEqual([]);
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(false);
+
+    bridge.attachTelnyx(telnyxSend);
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(call.transcript).toEqual([]);
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(false);
+
+    bridge.onTelnyxMessage({ event: "start" });
+    const payloads = telnyxSend.mock.calls
+      .filter((c) => c[0]?.event === "media")
+      .map((c) => (c[0] as { media: { payload: string } }).media.payload);
+    expect(payloads).toContain("T1BFTg==");
+    expect(payloads).toContain("SU5UUg==");
+    expect(call.transcript).toEqual([{ role: "assistant", text: call.greeting }]);
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(true);
+  });
+
+  it("does not mark the greeting delivered when waitForCallee=false attach happens with no Telnyx start", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = sampleCall();
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+    });
+    await bridge.onLiveEvent({ type: "session.started" });
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "T1BFTg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    bridge.attachTelnyx(telnyxSend);
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(call.transcript).toEqual([]);
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(false);
+    expect(liveSend.mock.calls.some((c) => (c[0] as { event_id?: string }).event_id === "converse-call-1")).toBe(
+      false,
+    );
   });
 });

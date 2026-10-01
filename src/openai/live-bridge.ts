@@ -63,8 +63,9 @@ export type GptLiveMediaBridgeOptions = {
 /**
  * Telnyx ↔ GPT-Live (`gpt-live-1`) speech-to-speech bridge.
  * Generate-early / speak-late: greeting audio is requested on `session.started`,
- * buffered while muted, and flushed to Telnyx only after waitForCallee unlock
- * (or immediately once Telnyx is attached if not waiting).
+ * buffered while muted, and flushed to Telnyx only after the media-stream `start`
+ * event (and waitForCallee unlock when waiting). Attach alone is not enough —
+ * Telnyx drops outbound PCMU sent before `start`.
  */
 export class GptLiveMediaBridge {
   readonly call: CallRecord;
@@ -88,6 +89,8 @@ export class GptLiveMediaBridge {
   private sessionFailed: Error | undefined;
   private readonly readyWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
   private telnyxAttached = false;
+  /** Telnyx `start` — do not send outbound PCMU before the media stream is unlocked. */
+  private outputReady = false;
   private greetingSent = false;
   private greetingPlaying = false;
   private greetingRequested = false;
@@ -119,6 +122,8 @@ export class GptLiveMediaBridge {
   private openingFlushed = false;
   private introAudioSeen = false;
   private greetingOutputDones = 0;
+  private openingTranscriptDone = false;
+  private introTranscriptDone = false;
   private pendingReplyAfterGreeting = false;
   private replySeq = 0;
   private replyInFlight = false;
@@ -150,8 +155,8 @@ export class GptLiveMediaBridge {
   attachTelnyx(sendTelnyx: (event: JsonObject) => void): void {
     this.sendTelnyx = sendTelnyx;
     this.telnyxAttached = true;
-    if (this.call.waitForCallee !== true && this.sessionReady) this.speakGreeting();
-    else this.flushGreetingIfReady();
+    // Telnyx ignores outbound media until it sends `start`. Buffer until then.
+    this.flushGreetingIfReady();
   }
 
   setOnEnded(onEnded: (call: CallRecord) => void): void {
@@ -271,7 +276,9 @@ export class GptLiveMediaBridge {
         if (this.call.status === "answered" || this.call.status === "dialing" || this.call.status === "ringing") {
           this.call.status = "in_progress";
         }
+        this.outputReady = true;
         if (this.call.waitForCallee !== true) this.speakGreeting();
+        else this.flushGreetingIfReady();
         return;
       case "media": {
         const media = message.media as JsonObject | undefined;
@@ -320,7 +327,7 @@ export class GptLiveMediaBridge {
       case "session.started":
         this.markSessionReady();
         this.requestGreetingAudio();
-        if (this.call.waitForCallee !== true && this.telnyxAttached) this.speakGreeting();
+        if (this.call.waitForCallee !== true && this.telnyxAttached && this.outputReady) this.speakGreeting();
         return;
       case "session.output_audio.delta": {
         this.onAudioDelta(event);
@@ -478,7 +485,7 @@ export class GptLiveMediaBridge {
     }
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
-    if (!this.telnyxAttached) return;
+    if (!this.telnyxAttached || !this.outputReady) return;
     this.replyInFlight = true;
     this.noteTurnAudio(delta);
     this.sendTelnyx({ event: "media", media: { payload: delta } });
@@ -495,7 +502,7 @@ export class GptLiveMediaBridge {
   }
 
   private flushGreetingIfReady(): void {
-    if (!this.telnyxAttached || !this.greetingSent) return;
+    if (!this.telnyxAttached || !this.outputReady || !this.greetingSent) return;
     const generation = this.greetingGeneration;
     if (this.greetingChunks.length > 0) {
       for (const chunk of this.greetingChunks) {
@@ -509,7 +516,7 @@ export class GptLiveMediaBridge {
     if (this.pendingGreetingIntro) {
       if (!this.openingFlushed) return;
       this.emitGreetingPause();
-      if (!this.greetingIntroRequested) this.requestGreetingIntroAudio();
+      if (!this.greetingIntroRequested && this.openingTranscriptDone) this.requestGreetingIntroAudio();
     }
     if (this.introChunks.length > 0) {
       for (const chunk of this.introChunks) {
@@ -614,19 +621,18 @@ export class GptLiveMediaBridge {
 
   private onOutputTranscript(event: JsonObject): void {
     const done = String(event.type ?? "").endsWith(".done");
-    if (
-      done &&
-      this.pendingGreetingIntro &&
-      !this.greetingIntroRequested &&
-      (this.isWaitingForCalleeSpeech() || this.openingFlushed)
-    ) {
+    if (done && this.greetingRequested && !this.greetingDone) {
+      if (this.greetingIntroRequested) this.introTranscriptDone = true;
+      else this.openingTranscriptDone = true;
+      this.greetingOutputDones += 1;
+    }
+    if (done && this.pendingGreetingIntro && !this.greetingIntroRequested) {
       this.requestGreetingIntroAudio();
     }
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     const delta = transcriptDelta(event);
     if (!this.greetingDone) {
-      if (done) this.greetingOutputDones += 1;
       if (this.shouldFinishGreetingOnOutputDone(done)) this.finishGreetingPlayback();
       return;
     }
@@ -644,9 +650,10 @@ export class GptLiveMediaBridge {
 
   private shouldFinishGreetingOnOutputDone(done: boolean): boolean {
     if (!done) return false;
-    if (!this.pendingGreetingIntro) return true;
-    if (this.introAudioSeen && this.greetingIntroRequested) return true;
-    if (this.greetingIntroRequested && this.greetingOutputDones >= 2) return true;
+    if (!this.outputReady || !this.greetingSent) return false;
+    if (!this.pendingGreetingIntro) return this.openingFlushed;
+    if (this.introTranscriptDone && this.introAudioSeen) return true;
+    if (this.greetingIntroRequested && this.greetingOutputDones >= 2 && this.introAudioSeen) return true;
     return false;
   }
 
