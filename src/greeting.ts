@@ -331,19 +331,36 @@ function extractIdentityClause(text: string): string {
 function extractSpokenAskProse(text: string): string {
   const askLike: string[] = [];
   const other: string[] = [];
+  const dated: string[] = [];
   for (const sentence of spokenSentences(text)) {
     if (!isCleanSpokenProse(sentence)) continue;
     if (looksLikeIdentityClause(sentence) && !SPOKEN_ASK_VERB.test(sentence)) continue;
     if (looksLikeIdentityClause(sentence) && /^(sou|fala a|fala o|falo|ligo da|this is)/i.test(sentence)) {
       continue;
     }
+    if (sentenceHasRequestedDate(sentence)) dated.push(sentence);
     if (SPOKEN_ASK_VERB.test(sentence)) askLike.push(sentence);
     else other.push(sentence);
   }
-  const chosen = askLike[0] ?? other[0] ?? "";
+  let chosen = askLike[0] ?? other[0] ?? "";
   if (!chosen) return "";
+  const extra = !sentenceHasRequestedDate(chosen)
+    ? dated.find((sentence) => sentence !== chosen)
+    : undefined;
+  if (extra) {
+    const headBudget = Math.max(24, MAX_SPOKEN_ASK_CHARS - extra.length - 2);
+    const head = clipSpoken(chosen.replace(/[.!?…]+$/u, ""), headBudget);
+    chosen = `${head.replace(/[.!?…]+$/u, "")}. ${extra}`;
+  }
   if (chosen.length > MAX_SPOKEN_ASK_CHARS) return clipSpoken(chosen, MAX_SPOKEN_ASK_CHARS);
   return chosen;
+}
+
+const REQUESTED_DATE_TOKEN =
+  /\b(hoje|amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo|janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|\d{1,2}\s+de\s+\p{L}+|\d{1,2}\/\d{1,2}|as\s+\d{1,2}h)/iu;
+
+function sentenceHasRequestedDate(text: string): boolean {
+  return REQUESTED_DATE_TOKEN.test(stripDiacritics(text).toLowerCase());
 }
 
 function spokenSentences(text: string): string[] {
@@ -414,6 +431,11 @@ export function looksLikeSystemRule(text: string): boolean {
   if (/\bfala portugues/.test(t) || /\bspeak (european )?portuguese/.test(t)) return true;
   if (/\binstruc/.test(t)) return true;
   if (/\broleplay\b/.test(t)) return true;
+  if (/\bsimulacao\b/.test(t) || /\bsimulation\b/.test(t)) return true;
+  if (/\bisto e um teste\b/.test(t) || /\bthis is a test\b/.test(t)) return true;
+  if (/\bchamada (e |eh )?falsa\b/.test(t) || /\bfake call\b/.test(t) || /\bpractice call\b/.test(t)) {
+    return true;
+  }
   if (/\btu ligas\b/.test(t) || /\byou (diall?ed|placed this call)\b/.test(t)) return true;
   if (/\bbrasileir/.test(t)) return true;
   if (/\buma ia\b/.test(t) || /\ban ai\b/.test(t) || /\bes uma ia\b/.test(t) || /\breveles que/.test(t)) {
@@ -468,9 +490,19 @@ function isDroppedLabel(text: string): boolean {
 }
 
 function toSpokenAsk(prose: string, language: Language): string {
-  const t = firstSpokenSentence(prose);
-  if (!t || !isCleanSpokenProse(t)) return "";
-  const clipped = t.length > MAX_SPOKEN_ASK_CHARS ? clipSpoken(t, MAX_SPOKEN_ASK_CHARS) : t;
+  const trimmed = prose.trim();
+  if (!trimmed) return "";
+  const first = firstSpokenSentence(trimmed);
+  if (!first || !isCleanSpokenProse(first)) return "";
+  let body = first;
+  if (!sentenceHasRequestedDate(first)) {
+    const rest = trimmed.slice(first.length).replace(/^[.\s!?…]+/u, "").trim();
+    const datedRest = firstSpokenSentence(rest);
+    if (datedRest && sentenceHasRequestedDate(datedRest) && isCleanSpokenProse(datedRest)) {
+      body = `${first.replace(/[.!?…]+$/u, "")}. ${datedRest}`;
+    }
+  }
+  const clipped = body.length > MAX_SPOKEN_ASK_CHARS ? clipSpoken(body, MAX_SPOKEN_ASK_CHARS) : body;
   if (!clipped) return "";
   if (looksLikeVoiceCasting(clipped) || looksLikeStyleNote(clipped)) return "";
   if (looksLikeIdentityClause(clipped) && !SPOKEN_ASK_VERB.test(clipped)) return "";

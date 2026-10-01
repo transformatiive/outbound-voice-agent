@@ -1,4 +1,4 @@
-import { END_CALL_TOOL_DESCRIPTION, type Language } from "../prompt.js";
+import { END_CALL_TOOL_DESCRIPTION, spokenMetaBan, type Language } from "../prompt.js";
 import { SEND_DTMF_TOOL } from "../dtmf.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "../greeting.js";
@@ -28,6 +28,9 @@ export type GptLiveVoice = (typeof GPT_LIVE_VOICES)[number];
 
 export const GPT_LIVE_VOICE_LIST = GPT_LIVE_VOICES.join(" | ");
 
+/** Explicit 1.0 so marin/gpt-live is not the implicit ~1.05 liveliness bump. */
+export const DEFAULT_GPT_LIVE_OUTPUT_SPEED = 1;
+
 /** Brazilian Portuguese GPT-Live voices — never the pt-PT default. */
 export const GPT_LIVE_BRAZILIAN_VOICES = ["bossa", "tempo"] as const;
 
@@ -48,8 +51,8 @@ export type GptLiveSessionStart = {
     instructions: string;
     audio: {
       format: GptLiveAudioFormat;
-      /** Voice only — GPT-Live has no `speed` field; playback is natural 1.0. */
-      output: { voice: string };
+      /** Pin 1.0 — omitting speed let marin play ~1.05. Never 1.05. */
+      output: { voice: string; speed: number };
     };
     delegation: {
       type: "responses";
@@ -194,6 +197,59 @@ export function gptLiveGreetingDeliveredThinkingAppend(input: {
   };
 }
 
+export function gptLiveConversationUnlockedInstructions(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return `A saudação (tempo do dia, depois identidade e objetivo) já foi dita. A partir de AGORA escuta e responde SEMPRE a cada turno do destinatário — inclusive «o que precisa», «sim?», «pois». Nunca fiques em silêncio depois de ele falar. Uma frase. Depois PARA e escuta o próximo turno. Usa a data e o sítio EXACTOS do briefing; nunca inventes «amanhã» nem outra data.`;
+    case "en-GB":
+    case "en-US":
+      return `The greeting (time of day, then identity and purpose) has been spoken. From NOW on listen and ALWAYS reply to every callee turn — including “what do you need?”, “yes?”, “hello?”. Never stay silent after they speak. One sentence, then STOP and listen. Use the exact date and venue from the brief — never invent “tomorrow” or another date.`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+export function gptLiveConversationUnlockedAppend(input: {
+  callId: string;
+  language: Language;
+}): GptLiveInstructionsAppend {
+  return {
+    type: "session.instructions.append",
+    event_id: `converse-${input.callId}`,
+    delegation_id: null,
+    content: gptLiveConversationUnlockedInstructions(input.language),
+  };
+}
+
+export function gptLiveReplyNowCommentary(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return "Responde agora, numa frase, ao que o destinatário acabou de dizer. Depois PARA e escuta.";
+    case "en-GB":
+    case "en-US":
+      return "Reply now, in one sentence, to what the callee just said. Then STOP and listen.";
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+export function gptLiveReplyNowCommentaryAppend(input: {
+  callId: string;
+  language: Language;
+  seq: number;
+}): GptLiveCommentaryAppend {
+  return {
+    type: "session.commentary.append",
+    event_id: `reply-${input.callId}-${input.seq}`,
+    delegation_id: null,
+    content: gptLiveReplyNowCommentary(input.language),
+  };
+}
+
 export function gptLiveSessionStartPayload(input: {
   voice?: string;
   model?: string;
@@ -228,8 +284,7 @@ export function gptLiveSessionStartPayload(input: {
       }),
       audio: {
         format: { type: "audio/pcmu", rate: 8000 },
-        // Live has no playback-rate knob; omit speed so the API uses natural 1.0.
-        output: { voice },
+        output: { voice, speed: DEFAULT_GPT_LIVE_OUTPUT_SPEED },
       },
       delegation: {
         type: "responses",
@@ -268,14 +323,16 @@ export function gptLiveExpressiveVoiceInstructions(language: Language): string {
       return `# Voz (ChatGPT Voice — esta sessão live)
 Falas como uma pessoa real ao telefone, não como um IVR nem como quem lê um guião. Varia o ritmo e a entoação: sobe na saudação, desce nas confirmações, acentua a pergunta. Hesitações naturais e breves quando fizer sentido («hmm», «certo», «pois»). Empatia curta se a pessoa hesitar, recusar ou parecer ocupada — uma frase, não um discurso.
 PROIBIDO tom de menu automático / IVR. PROIBIDO voz plana de robô. PROIBIDO encadear um parágrafo.
-Turnos curtos: uma frase. Depois PARA e escuta. Não faças duas perguntas no mesmo fôlego. O ritmo humano vem da entoação e das pausas — NÃO aceleres a fala (não há speed; fica natural ~1.0).
-Língua: só português europeu de Portugal (Lisboa, pt-PT). Zero português do Brasil: nunca «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?».`;
+Turnos curtos: uma frase. Depois PARA e escuta o próximo turno. Quando o destinatário voltar a falar, responde SEMPRE — nunca fiques em silêncio depois de uma pergunta. Não faças duas perguntas no mesmo fôlego. O ritmo humano vem da entoação e das pausas — NÃO aceleres a fala (speed=1.0).
+Língua: só português europeu de Portugal (Lisboa, pt-PT). Zero português do Brasil: nunca «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?».
+${spokenMetaBan("pt-PT")}`;
     case "en-GB":
     case "en-US":
       return `# Voice (ChatGPT Voice — this live session)
 Speak like a real person on the phone, not an IVR or a script reader. Vary rhythm and intonation. Brief natural hesitations (“hmm”, “right”) when they fit. Short empathy if they hesitate, decline, or sound busy — one sentence, not a speech.
 FORBIDDEN: IVR / script-reading tone. FORBIDDEN: a flat robot voice. FORBIDDEN: dumping a paragraph.
-Short turns: one sentence. Then STOP and listen. Do not stack two questions in one breath. Human pace comes from intonation and pauses — do not speed up (no playback-rate knob; stay natural ~1.0).`;
+Short turns: one sentence. Then STOP and listen for the next turn. When the callee speaks again, ALWAYS reply — never stay silent after a question. Do not stack two questions in one breath. Human pace comes from intonation and pauses — do not speed up (speed=1.0).
+${spokenMetaBan("en-GB")}`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -304,9 +361,14 @@ export function buildGptLiveInstructions(input: {
 
 ${expressive}
 
+# Objetivo (interno — não despejes; persona falada = só o título curto)
+${input.objective}
+
+A data, a hora e o sítio deste briefing são EXACTOS. Nunca inventes «amanhã» nem outra data. Estilo e anti-BR estão nestas instruções, não na persona.
+
 Língua: falas SEMPRE português europeu de Portugal (Lisboa, pt-PT). Hard-lock. NUNCA português do Brasil. Nunca espelhes o sotaque do interlocutor. Tratamento: 3.ª pessoa europeia («pode dizer-me», «o seu»). NUNCA «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?». Pares: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; comboio nunca trem; casa de banho nunca banheiro.
 
-Tom: voz de telefone humana, calorosa, frases curtas. Uma frase. PARA. Escuta. Responde já. A saudação já começa por «${timeGreeting}». Não comeces por Olá nem Oi.
+Tom: voz de telefone humana, calorosa, frases curtas. Uma frase. PARA. Escuta. Quando o destinatário falar, responde já — nunca fiques calada. A saudação já começa por «${timeGreeting}». Não comeces por Olá nem Oi.
 
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
 
@@ -337,7 +399,12 @@ Do not guess the result while waiting.${input.ivr ? "\n\nEsta chamada pode cair 
 
 ${expressive}
 
-Speak ${input.language === "en-GB" ? "British English" : "American English"} for the whole call. Short warm phone turns. One sentence, then stop and listen. Reply immediately. The greeting already starts with “${timeGreeting}”. Do not start with Hello.
+# Objective (internal — do not dump; spoken persona is the short title only)
+${input.objective}
+
+The date, time, and venue in this brief are EXACT. Never invent “tomorrow” or another date. Style notes belong in instructions, not persona.
+
+Speak ${input.language === "en-GB" ? "British English" : "American English"} for the whole call. Short warm phone turns. One sentence, then stop and listen. When the callee speaks, reply immediately — never stay silent. The greeting already starts with “${timeGreeting}”. Do not start with Hello.
 
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
 
@@ -398,7 +465,8 @@ ${timezone}
 - \`${END_CALL_TOOL.name}\`: ${END_CALL_TOOL_DESCRIPTION}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
-Quando o objetivo estiver concluído, recusado ou impossível: a voz agradece só (sem recap de hora/pessoas/nome) e tu chamas end_call. Nunca inventes factos do estabelecimento. Nunca inverta o papel: quem ligou pede a mesa; quem atendeu é a casa.
+Quando o objetivo estiver concluído, recusado ou impossível: a voz agradece só (sem recap de hora/pessoas/nome) e tu chamas end_call. Nunca inventes factos do estabelecimento. Nunca inventes «amanhã» nem outra data — usa a data EXACTA do objetivo. Nunca inverta o papel: quem ligou pede a mesa; quem atendeu é a casa.
+${spokenMetaBan("pt-PT")}
 ${input.ivr ? "Esta chamada pode ser IVR: usa send_dtmf quando pedirem teclas.\n" : ""}${extra}`.trim();
     case "en-GB":
     case "en-US":
@@ -417,7 +485,8 @@ ${timezone}
 - \`${END_CALL_TOOL.name}\`: ${END_CALL_TOOL_DESCRIPTION}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
-When the objective is complete, declined, or impossible: the voice thanks them only (no recap) and you call end_call. Never invent venue facts. The bot placed the call; the callee is venue staff.
+When the objective is complete, declined, or impossible: the voice thanks them only (no recap) and you call end_call. Never invent venue facts. Never invent “tomorrow” or another date — use the exact date from the objective. The bot placed the call; the callee is venue staff.
+${spokenMetaBan("en-GB")}
 ${input.ivr ? "This call may be IVR: use send_dtmf when they ask for keys.\n" : ""}${extra}`.trim();
     default: {
       const _never: never = input.language;

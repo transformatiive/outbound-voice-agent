@@ -212,6 +212,7 @@ export class MediaBridge {
   markOutputReady(): void {
     if (this.outputReady) return;
     this.outputReady = true;
+    if (this.call.waitForCallee === true && !this.greetingSent) return;
     if (this.pendingSpeak || this.call.waitForCallee !== true) this.speakGreeting();
   }
 
@@ -244,6 +245,7 @@ export class MediaBridge {
   speakGreeting(): void {
     if (this.greetingSent) return;
     if (!this.outputReady) {
+      if (this.call.waitForCallee === true) return;
       this.pendingSpeak = true;
       return;
     }
@@ -370,6 +372,10 @@ export class MediaBridge {
       case "input_audio_buffer.speech_started": {
         if (this.hangingUp) return;
         const waiting = this.isWaitingForCalleeSpeech();
+        if (waiting && this.wantsElevenLabsPlayback()) {
+          // Same contract as GPT-Live: do not unlock on Grok VAD (fires on line noise).
+          return;
+        }
         const decision = onSpeechStarted(this.calleeGate, waiting, this.clockMs(), this.calleeSpeechConfig);
         if (waiting) {
           this.logCalleeGate(decision, "speech_started");
@@ -390,6 +396,7 @@ export class MediaBridge {
           vadAudioDurationMs(event),
         );
         if (waiting) {
+          if (this.wantsElevenLabsPlayback()) return;
           this.logCalleeGate(decision, "speech_stopped");
           if (decision.unlock) this.speakGreeting();
         } else if (this.greetingSent) {

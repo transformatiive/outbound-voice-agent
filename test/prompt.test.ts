@@ -337,6 +337,10 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/NUNCA leias listas numeradas/);
     expect(pt).toMatch(/Palavra falada/);
     expect(pt).toMatch(/NUNCA leias[\s\S]*ROLEPLAY/);
+    expect(pt).toMatch(/simulação/);
+    expect(pt).toMatch(/isto é um teste/);
+    expect(pt).toMatch(/título curto/);
+    expect(pt).not.toMatch(/outra pessoa roleplay/i);
     assertNoSpokenBranding(pt);
 
     const en = buildSessionInstructions({
