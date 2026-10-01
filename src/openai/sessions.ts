@@ -6,6 +6,8 @@ export type OpenAIFamilyBridge = {
   attachTelnyx(sendTelnyx: (event: JsonObject) => void): void;
   setOnEnded(onEnded: (call: CallRecord) => void): void;
   onTelnyxMessage(message: JsonObject): void;
+  /** PSTN answer — media `start` can arrive during ring and must not play the greeting yet. */
+  notifyCallAnswered(): void;
   waitUntilReady(timeoutMs: number): Promise<void>;
   failSession(err: Error): void;
   flushTranscript(): void;

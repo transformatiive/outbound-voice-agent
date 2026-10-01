@@ -138,6 +138,26 @@ describe("composeSpokenGreeting", () => {
     ).toBe("Boa noite. Sou a secretária da Alfaseguros. Queria marcar um jantar.");
   });
 
+  it("does not treat a short time-of-day greeting as identity (Sou a boa noite)", () => {
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        greeting: "Boa noite.",
+        objective: "Reservar mesa na Capricciosa para hoje.",
+        now: LISBON_MORNING,
+      }),
+    ).toBe("Bom dia. Sou a secretária. Reservar mesa na Capricciosa para hoje.");
+
+    expect(
+      composeSpokenGreeting({
+        language: "pt-PT",
+        greeting: "Boa noite.",
+        objective: "Reservar mesa na Capricciosa para hoje.",
+        now: LISBON_EVENING,
+      }),
+    ).toBe("Boa noite. Sou a secretária. Reservar mesa na Capricciosa para hoje.");
+  });
+
   it("prepends Lisbon time when a custom greeting has persona but no time-of-day", () => {
     expect(
       composeSpokenGreeting({

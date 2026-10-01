@@ -8,6 +8,14 @@ const LEADING_HELLO = /^(olá|ola|hello)\s*[,.]?\s*/i;
 const LEADING_TIME =
   /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\s*[,.]?\s*/i;
 
+/** Posted greeting is only a time-of-day line — never wrap it as «sou a boa noite». */
+export function isTimeOfDayOnlyGreeting(text: string): boolean {
+  const raw = text.trim();
+  if (!raw) return false;
+  const stripped = stripLeadingTime(stripLeadingHello(raw)).replace(/[.!?…]+$/u, "").trim();
+  return stripped.length === 0;
+}
+
 /** Opening verbs that are already a natural spoken ask — do not wrap with «ligo sobre». */
 const SPOKEN_ASK_VERB =
   /^(confirmar|confirma|pedir|peça|marcar|agendar|ligar|ligo|queria|quero|gostaria|preciso|reservar|chamo|confirm|please|i\b|we\b|calling|call|ask)\b/i;
@@ -136,9 +144,16 @@ function identitySourceText(input: {
   const personaRaw = input.persona?.trim() ?? "";
   const greetingRaw = input.greeting?.trim() ?? "";
   // Prefer an explicit natural spoken greeting over a persona dump (call 28619c45).
-  if (greetingRaw && isNaturalSpokenGreeting(greetingRaw)) return greetingRaw;
+  // A lone «Boa noite.» is the clock greeting, not a name — do not «sou a boa noite».
+  if (
+    greetingRaw &&
+    !isTimeOfDayOnlyGreeting(greetingRaw) &&
+    isNaturalSpokenGreeting(greetingRaw)
+  ) {
+    return greetingRaw;
+  }
   if (personaRaw) return personaRaw;
-  if (!greetingRaw) return "";
+  if (!greetingRaw || isTimeOfDayOnlyGreeting(greetingRaw)) return "";
   const greetingDump = looksLikeInstructionDump(greetingRaw);
   const canComposeWithoutGreeting =
     Boolean(input.spokenAsk?.trim()) || Boolean(extractSpokenAskProse(input.objective));

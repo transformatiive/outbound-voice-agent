@@ -71,6 +71,25 @@ async function waitFor(
   throw new Error(`timeout waiting for websocket message: ${JSON.stringify(queue)}`);
 }
 
+async function postCallAnswered(
+  app: ReturnType<typeof createApp>["app"],
+  callId: string,
+  callControlId = "v2:control-id",
+): Promise<void> {
+  await request(app)
+    .post("/webhooks/telnyx")
+    .send({
+      data: {
+        event_type: "call.answered",
+        id: `evt-ans-${callId}`,
+        payload: {
+          call_control_id: callControlId,
+          client_state: Buffer.from(callId, "utf8").toString("base64"),
+        },
+      },
+    });
+}
+
 describe("media stream websocket", () => {
   it("bridges Telnyx media to a fake Grok socket and speaks the greeting", async () => {
     const grokWss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
@@ -136,6 +155,7 @@ describe("media stream websocket", () => {
         telnyxWs.once("open", () => resolve());
         telnyxWs.once("error", reject);
       });
+      await postCallAnswered(app, call.id);
 
       const sessionUpdate = grokFromApp.find((m) => m.type === "session.update") as JsonObject;
       expect((sessionUpdate.session as JsonObject).voice).toBe("ara");
@@ -381,6 +401,7 @@ describe("media stream websocket", () => {
         telnyxWs.once("open", () => resolve());
         telnyxWs.once("error", reject);
       });
+      await postCallAnswered(app, call.id);
 
       const grokWs = await grokConnection;
       await waitFor(grokFromApp, (m) => m.type === "session.update");
@@ -400,7 +421,7 @@ describe("media stream websocket", () => {
       expect(elCalls[0]?.url).toContain("output_format=ulaw_8000");
       expect(elCalls[0]?.url).not.toContain("optimize_streaming_latency");
       const prefetched = elCalls.map((c) => c.body).join("\n");
-      expect(prefetched).toMatch(/Boa (tarde|dia|noite)/);
+      expect(prefetched).toMatch(/Bom dia|Boa tarde|Boa noite/);
       expect(prefetched).toMatch(/Sou a secretária|sou a secretária|Confirmar quinta/);
 
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
@@ -747,7 +768,7 @@ describe("media stream websocket", () => {
     }
   });
 
-  it("plays pre-cached GPT-Live greeting to Telnyx on start when waitForCallee is false", async () => {
+  it("plays pre-cached GPT-Live greeting after answer, not on Telnyx start during ring", async () => {
     const { connectFakeGptLive, FakeGptLiveWebSocket } = await import("./helpers/fake-gpt-live-ws.js");
     let fake: InstanceType<typeof FakeGptLiveWebSocket> | undefined;
     const withLive: AppConfig = {
@@ -817,6 +838,23 @@ describe("media stream websocket", () => {
       expect(call.transcript.length).toBe(0);
 
       telnyxWs.send(JSON.stringify({ event: "start" }));
+      await new Promise((r) => setTimeout(r, 40));
+      expect(telnyxFromLive.some((m) => m.event === "media")).toBe(false);
+      expect(call.transcript.length).toBe(0);
+      expect(call.status).toBe("dialing");
+
+      await request(app)
+        .post("/webhooks/telnyx")
+        .send({
+          data: {
+            event_type: "call.answered",
+            id: "evt-ans-gpt-live",
+            payload: {
+              call_control_id: "v2:control-id",
+              client_state: Buffer.from(call.id, "utf8").toString("base64"),
+            },
+          },
+        });
       const media = await waitFor(telnyxFromLive, (m) => m.event === "media");
       expect(media).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
       expect(call.transcript[0]).toEqual({ role: "assistant", text: call.greeting });

@@ -401,6 +401,80 @@ describe("GPT-Live media bridge", () => {
     expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(true);
   });
 
+  it("does not flush waitForCallee=false greeting PCMU on start during ring (Telnyx connects at dial)", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = {
+      ...sampleCall(),
+      status: "ringing" as const,
+      greeting: "Boa tarde. Sou a secretária do Nuno. Queria marcar um jantar na Capricciosa.",
+    };
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+    });
+    await bridge.onLiveEvent({ type: "session.started" });
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "T1BFTg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "SU5UUg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    expect(call.transcript).toEqual([]);
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.thinking.append")).toBe(false);
+    expect(call.status).toBe("ringing");
+
+    bridge.notifyCallAnswered();
+    const payloads = telnyxSend.mock.calls
+      .filter((c) => c[0]?.event === "media")
+      .map((c) => (c[0] as { media: { payload: string } }).media.payload);
+    expect(payloads).toContain("T1BFTg==");
+    expect(payloads).toContain("SU5UUg==");
+    expect(call.transcript).toEqual([{ role: "assistant", text: call.greeting }]);
+  });
+
+  it("still plays greeting when opening transcript.done arrives before any PCMU (GPT-Live text-first)", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = {
+      ...sampleCall(),
+      greeting: "Boa tarde. Sou a secretária do Nuno. Queria marcar um jantar na Capricciosa.",
+    };
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+    });
+    await bridge.onLiveEvent({ type: "session.started" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    expect(liveSend.mock.calls.filter((c) => (c[0] as { event_id?: string }).event_id === "greeting-call-1-intro").length).toBe(
+      0,
+    );
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "T1BFTg==" });
+    const introInstruct = liveSend.mock.calls
+      .filter((c) => c[0]?.type === "session.instructions.append")
+      .at(-1)?.[0] as { content: string; event_id?: string };
+    expect(introInstruct.content).toContain("Sou a secretária do Nuno");
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "SU5UUg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+
+    bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
+    const payloads = telnyxSend.mock.calls
+      .filter((c) => c[0]?.event === "media")
+      .map((c) => (c[0] as { media: { payload: string } }).media.payload);
+    expect(payloads).toContain("T1BFTg==");
+    expect(payloads).toContain("SU5UUg==");
+    expect(call.transcript).toEqual([{ role: "assistant", text: call.greeting }]);
+  });
+
   it("does not mark the greeting delivered when waitForCallee=false attach happens with no Telnyx start", async () => {
     const liveSend = vi.fn();
     const telnyxSend = vi.fn();

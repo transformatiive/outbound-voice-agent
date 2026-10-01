@@ -136,6 +136,7 @@ export class MediaBridge {
   private readonly grokGreetingBuffer = new PcmuFrameBuffer();
   private outputReady: boolean;
   private pendingSpeak = false;
+  private callAnswered = false;
   private lastSpeechStoppedAtMs: number | undefined;
   private readonly pcmuVad: PcmuVad;
   private readonly postOpeningPauseMs: number;
@@ -210,10 +211,25 @@ export class MediaBridge {
 
   /** Telnyx media is live — playback of already-generated greeting may start (unless waitForCallee). */
   markOutputReady(): void {
-    if (this.outputReady) return;
+    if (this.call.waitForCallee !== true && !this.isCalleeOnTheLine()) {
+      this.pendingSpeak = true;
+      return;
+    }
+    if (this.outputReady) {
+      if (this.pendingSpeak && this.call.waitForCallee !== true) this.speakGreeting();
+      return;
+    }
     this.outputReady = true;
     if (this.call.waitForCallee === true && !this.greetingSent) return;
     if (this.pendingSpeak || this.call.waitForCallee !== true) this.speakGreeting();
+  }
+
+  notifyCallAnswered(): void {
+    this.callAnswered = true;
+    if (this.call.status === "dialing" || this.call.status === "ringing") {
+      this.call.status = "answered";
+    }
+    if (this.pendingSpeak || this.call.waitForCallee !== true) this.markOutputReady();
   }
 
   configureGrokSession(): void {
@@ -305,9 +321,7 @@ export class MediaBridge {
         return;
       case "start":
         noteStreamStart(this.calleeGate, this.clockMs());
-        if (this.call.status === "answered" || this.call.status === "dialing" || this.call.status === "ringing") {
-          this.call.status = "in_progress";
-        }
+        if (this.call.status === "answered") this.call.status = "in_progress";
         this.markOutputReady();
         this.primeGreetingGeneration();
         return;
@@ -528,6 +542,26 @@ export class MediaBridge {
 
   private isWaitingForCalleeSpeech(): boolean {
     return this.call.waitForCallee === true && !this.greetingSent;
+  }
+
+  private isCalleeOnTheLine(): boolean {
+    if (this.callAnswered) return true;
+    switch (this.call.status) {
+      case "answered":
+      case "in_progress":
+        return true;
+      case "dialing":
+      case "ringing":
+      case "completed":
+      case "failed":
+      case "no_answer":
+      case "busy":
+        return false;
+      default: {
+        const _never: never = this.call.status;
+        return _never;
+      }
+    }
   }
 
   private onGrokResponseCreated(event: JsonObject): void {
