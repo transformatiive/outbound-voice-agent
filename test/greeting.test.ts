@@ -198,6 +198,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
       "Bom dia. Sou a secretária da clínica. Confirmar a consulta de otorrino na segunda-feira às 10h.",
     );
     expect(spoken).not.toMatch(/ROLEPLAY/i);
+    expect(spoken).not.toMatch(/simulação/i);
     expect(spoken).not.toMatch(/\bROLE\b/);
     expect(spoken).not.toMatch(/quem atende/i);
     expect(spoken).not.toMatch(/INSTRUCTIONS/i);
@@ -271,6 +272,7 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     expect(spoken).toMatch(/sexta-feira, 3 de outubro/i);
     expect(spoken).not.toMatch(/\bamanhã\b/i);
     expect(spoken).not.toMatch(/Mulher de Lisboa|Tom humano|brasileir/i);
+    expect(spoken).not.toMatch(/simulação|ROLEPLAY|isto é um teste/i);
   });
 
   it("uses persona as spoken identity and never greets as the restaurant", () => {

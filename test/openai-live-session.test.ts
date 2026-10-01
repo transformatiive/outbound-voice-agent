@@ -56,6 +56,9 @@ describe("GPT-Live session", () => {
     expect(payload.session.instructions).toMatch(/Confirmar marcação/);
     expect(payload.session.instructions).toMatch(/nunca inventes/i);
     expect(payload.session.instructions).toMatch(/Objetivo \(interno/);
+    expect(payload.session.instructions).toMatch(/simulação/);
+    expect(payload.session.instructions).toMatch(/isto é um teste/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/simulação/);
   });
 
   it("writes the live prompt in European Portuguese and never defaults to bossa/tempo", () => {

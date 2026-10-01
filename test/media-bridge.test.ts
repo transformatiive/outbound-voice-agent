@@ -1417,6 +1417,69 @@ describe("media bridge ElevenLabs TTS playback", () => {
     spyLog.mockRestore();
   });
 
+  it("does not play ElevenLabs TTS on markOutputReady or Grok VAD when waitForCallee is true", async () => {
+    const clock = { ms: 0 };
+    const tts = mockElevenLabsTts();
+    const telnyxSend = vi.fn();
+    const bridge = new MediaBridge({
+      call: {
+        ...elCall(),
+        waitForCallee: true,
+        greeting: "Boa tarde. Sou a secretária do Nuno. Queria marcar um jantar na Capricciosa.",
+      },
+      sendGrok: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: tts,
+      outputReady: false,
+      clockMs: () => clock.ms,
+    });
+    bridge.speakGreeting();
+    bridge.markOutputReady();
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onGrokEvent({ type: "session.updated" });
+    await bridge.onGrokEvent({ type: "response.output_audio.delta", delta: "GROKAUDIO" });
+    clock.ms = 400;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    await flushMicrotasks();
+    expect(telnyxSend.mock.calls.some((c) => (c[0] as { event?: string }).event === "media")).toBe(
+      false,
+    );
+
+    await bridge.onGrokEvent({
+      type: "conversation.item.input_audio_transcription.completed",
+      transcript: "Estou",
+    });
+    await flushMicrotasks();
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+  });
+
+  it("unlocks ElevenLabs waitForCallee on post-grace PCMU like GPT-Live, not on Grok speech_started", async () => {
+    const clock = { ms: 0 };
+    const tts = mockElevenLabsTts();
+    const telnyxSend = vi.fn();
+    const speech = Buffer.alloc(160, 0x20).toString("base64");
+    const bridge = new MediaBridge({
+      call: { ...elCall(), waitForCallee: true },
+      sendGrok: vi.fn(),
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      elevenLabsTts: tts,
+      clockMs: () => clock.ms,
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    await flushMicrotasks();
+    clock.ms = 400;
+    await bridge.onGrokEvent({ type: "input_audio_buffer.speech_started" });
+    expect(telnyxSend.mock.calls.some((c) => (c[0] as { event?: string }).event === "media")).toBe(
+      false,
+    );
+    bridge.onTelnyxMessage({ event: "media", media: { payload: speech } });
+    bridge.onTelnyxMessage({ event: "media", media: { payload: speech } });
+    await flushMicrotasks();
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: EL_PCMU } });
+  });
+
   it("retries ElevenLabs TTS on unlock when greeting prefetch failed with an empty cache", async () => {
     const clock = { ms: 0 };
     const logs: string[] = [];

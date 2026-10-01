@@ -1,4 +1,4 @@
-import { END_CALL_TOOL_DESCRIPTION, type Language } from "../prompt.js";
+import { END_CALL_TOOL_DESCRIPTION, spokenMetaBan, type Language } from "../prompt.js";
 import { SEND_DTMF_TOOL } from "../dtmf.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "../greeting.js";
@@ -324,13 +324,15 @@ export function gptLiveExpressiveVoiceInstructions(language: Language): string {
 Falas como uma pessoa real ao telefone, não como um IVR nem como quem lê um guião. Varia o ritmo e a entoação: sobe na saudação, desce nas confirmações, acentua a pergunta. Hesitações naturais e breves quando fizer sentido («hmm», «certo», «pois»). Empatia curta se a pessoa hesitar, recusar ou parecer ocupada — uma frase, não um discurso.
 PROIBIDO tom de menu automático / IVR. PROIBIDO voz plana de robô. PROIBIDO encadear um parágrafo.
 Turnos curtos: uma frase. Depois PARA e escuta o próximo turno. Quando o destinatário voltar a falar, responde SEMPRE — nunca fiques em silêncio depois de uma pergunta. Não faças duas perguntas no mesmo fôlego. O ritmo humano vem da entoação e das pausas — NÃO aceleres a fala (speed=1.0).
-Língua: só português europeu de Portugal (Lisboa, pt-PT). Zero português do Brasil: nunca «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?».`;
+Língua: só português europeu de Portugal (Lisboa, pt-PT). Zero português do Brasil: nunca «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?».
+${spokenMetaBan("pt-PT")}`;
     case "en-GB":
     case "en-US":
       return `# Voice (ChatGPT Voice — this live session)
 Speak like a real person on the phone, not an IVR or a script reader. Vary rhythm and intonation. Brief natural hesitations (“hmm”, “right”) when they fit. Short empathy if they hesitate, decline, or sound busy — one sentence, not a speech.
 FORBIDDEN: IVR / script-reading tone. FORBIDDEN: a flat robot voice. FORBIDDEN: dumping a paragraph.
-Short turns: one sentence. Then STOP and listen for the next turn. When the callee speaks again, ALWAYS reply — never stay silent after a question. Do not stack two questions in one breath. Human pace comes from intonation and pauses — do not speed up (speed=1.0).`;
+Short turns: one sentence. Then STOP and listen for the next turn. When the callee speaks again, ALWAYS reply — never stay silent after a question. Do not stack two questions in one breath. Human pace comes from intonation and pauses — do not speed up (speed=1.0).
+${spokenMetaBan("en-GB")}`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -464,6 +466,7 @@ ${timezone}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
 Quando o objetivo estiver concluído, recusado ou impossível: a voz agradece só (sem recap de hora/pessoas/nome) e tu chamas end_call. Nunca inventes factos do estabelecimento. Nunca inventes «amanhã» nem outra data — usa a data EXACTA do objetivo. Nunca inverta o papel: quem ligou pede a mesa; quem atendeu é a casa.
+${spokenMetaBan("pt-PT")}
 ${input.ivr ? "Esta chamada pode ser IVR: usa send_dtmf quando pedirem teclas.\n" : ""}${extra}`.trim();
     case "en-GB":
     case "en-US":
@@ -483,6 +486,7 @@ ${timezone}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
 When the objective is complete, declined, or impossible: the voice thanks them only (no recap) and you call end_call. Never invent venue facts. Never invent “tomorrow” or another date — use the exact date from the objective. The bot placed the call; the callee is venue staff.
+${spokenMetaBan("en-GB")}
 ${input.ivr ? "This call may be IVR: use send_dtmf when they ask for keys.\n" : ""}${extra}`.trim();
     default: {
       const _never: never = input.language;

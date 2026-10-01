@@ -431,6 +431,11 @@ export function looksLikeSystemRule(text: string): boolean {
   if (/\bfala portugues/.test(t) || /\bspeak (european )?portuguese/.test(t)) return true;
   if (/\binstruc/.test(t)) return true;
   if (/\broleplay\b/.test(t)) return true;
+  if (/\bsimulacao\b/.test(t) || /\bsimulation\b/.test(t)) return true;
+  if (/\bisto e um teste\b/.test(t) || /\bthis is a test\b/.test(t)) return true;
+  if (/\bchamada (e |eh )?falsa\b/.test(t) || /\bfake call\b/.test(t) || /\bpractice call\b/.test(t)) {
+    return true;
+  }
   if (/\btu ligas\b/.test(t) || /\byou (diall?ed|placed this call)\b/.test(t)) return true;
   if (/\bbrasileir/.test(t)) return true;
   if (/\buma ia\b/.test(t) || /\ban ai\b/.test(t) || /\bes uma ia\b/.test(t) || /\breveles que/.test(t)) {
