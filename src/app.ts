@@ -230,6 +230,9 @@ export function createApp(deps: AppDeps): CreatedApp {
       ...(ttsProviderUsesGrokVoice(result.call.ttsProvider ?? DEFAULT_TTS_PROVIDER)
         ? { grokVoice: result.call.voice }
         : {}),
+      ...(result.call.elevenlabsModel !== undefined
+        ? { elevenlabsModel: result.call.elevenlabsModel }
+        : {}),
     });
   });
 

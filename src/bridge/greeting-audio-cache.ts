@@ -49,6 +49,7 @@ export async function fillPcmuFrameBuffer(
     text: string;
     language: Language;
     callId?: string;
+    model?: string;
     onHttpStart?: () => void;
     onFirstByte?: () => void;
   },
@@ -58,6 +59,7 @@ export async function fillPcmuFrameBuffer(
       text: opts.text,
       language: opts.language,
       signal: buffer.abort.signal,
+      ...(opts.model ? { model: opts.model } : {}),
       ...(opts.onHttpStart ? { onHttpStart: opts.onHttpStart } : {}),
       ...(opts.onFirstByte ? { onFirstByte: opts.onFirstByte } : {}),
     })) {
@@ -107,6 +109,7 @@ export type GreetingCacheStart = {
   text: string;
   language: Language;
   tts: ElevenLabsTts;
+  model?: string;
   onHttpStart?: () => void;
   onFirstByte?: () => void;
 };
@@ -137,6 +140,7 @@ export class GreetingAudioCache {
       text: opts.text,
       language: opts.language,
       callId: opts.callId,
+      ...(opts.model ? { model: opts.model } : {}),
       ...(opts.onHttpStart ? { onHttpStart: opts.onHttpStart } : {}),
       ...(opts.onFirstByte ? { onFirstByte: opts.onFirstByte } : {}),
     });
@@ -148,10 +152,17 @@ export class GreetingAudioCache {
     if (!entry) return;
     entry.buffer.abort.abort();
     entry.buffer.finish(false);
+    const intro = this.entries.get(`${callId}::intro`);
+    if (intro && intro !== entry) {
+      intro.buffer.abort.abort();
+      intro.buffer.finish(false);
+    }
   }
 
   drop(callId: string): void {
     this.abort(callId);
+    this.abort(`${callId}::intro`);
     this.entries.delete(callId);
+    this.entries.delete(`${callId}::intro`);
   }
 }

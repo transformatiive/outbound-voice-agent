@@ -46,6 +46,88 @@ describe("GPT-Live media bridge", () => {
 
     await bridge.onLiveEvent({ type: "session.input_transcript.delta", delta: "Estou" });
     expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "UlRQQQ==" } });
+    telnyxSend.mockClear();
+    await bridge.onLiveEvent({ type: "session.input_transcript.delta", delta: "Estou?" });
+    expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
+  });
+
+  it("unlocks waitForCallee on post-grace PCMU speech without an ASR transcript", async () => {
+    let now = 0;
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const speech = Buffer.alloc(160, 0x20).toString("base64");
+    const bridge = new GptLiveMediaBridge({
+      call: { ...sampleCall(), waitForCallee: true },
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      clockMs: () => now,
+      postOpeningPauseMs: 0,
+    });
+    bridge.attachTelnyx(telnyxSend);
+    await bridge.onLiveEvent({ type: "session.started", session: { id: "s1" } });
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "UlRQQQ==" });
+    expect(telnyxSend).not.toHaveBeenCalled();
+    now = 400;
+    bridge.onTelnyxMessage({ event: "media", media: { payload: speech } });
+    bridge.onTelnyxMessage({ event: "media", media: { payload: speech } });
+    expect(telnyxSend).toHaveBeenCalledWith({ event: "media", media: { payload: "UlRQQQ==" } });
+  });
+
+  it("buffers inbound PCMU until the live session is ready", async () => {
+    const liveSend = vi.fn();
+    const bridge = new GptLiveMediaBridge({
+      call: sampleCall(),
+      sendLive: liveSend,
+      sendTelnyx: vi.fn(),
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+    });
+    bridge.onTelnyxMessage({ event: "start" });
+    liveSend.mockClear();
+    bridge.onTelnyxMessage({
+      event: "media",
+      media: { track: "inbound", payload: "QUJDRA==" },
+    });
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.input_audio.append")).toBe(false);
+    await bridge.onLiveEvent({ type: "session.started" });
+    expect(liveSend).toHaveBeenCalledWith({ type: "session.input_audio.append", audio: "QUJDRA==" });
+  });
+
+  it("plays opening then intro as two beats when the greeting has a period split", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const bridge = new GptLiveMediaBridge({
+      call: {
+        ...sampleCall(),
+        waitForCallee: true,
+        greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      },
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+    });
+    bridge.attachTelnyx(telnyxSend);
+    await bridge.onLiveEvent({ type: "session.started" });
+    const first = liveSend.mock.calls.find((c) => c[0]?.type === "session.instructions.append")?.[0] as {
+      content: string;
+    };
+    expect(first.content).toContain("Boa tarde.");
+    expect(first.content).not.toContain("Sou a secretária do Nuno Barreto.");
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "T1BFTg==" });
+    await bridge.onLiveEvent({ type: "session.output_transcript.done" });
+    const introInstruct = liveSend.mock.calls
+      .filter((c) => c[0]?.type === "session.instructions.append")
+      .at(-1)?.[0] as { content: string };
+    expect(introInstruct.content).toContain("Sou a secretária do Nuno Barreto.");
+    await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "SU5UUg==" });
+    await bridge.onLiveEvent({ type: "session.input_transcript.delta", delta: "Estou" });
+    const payloads = telnyxSend.mock.calls
+      .filter((c) => c[0]?.event === "media")
+      .map((c) => (c[0] as { media: { payload: string } }).media.payload);
+    expect(payloads).toContain("T1BFTg==");
+    expect(payloads).toContain("SU5UUg==");
   });
 
   it("forwards Telnyx PCMU to session.input_audio.append after the session is ready", async () => {

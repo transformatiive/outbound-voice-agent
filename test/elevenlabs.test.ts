@@ -369,8 +369,8 @@ describe("ElevenLabs HTTP TTS", () => {
   });
 
   it("classifies the live eleven_v3 400 as an optimize-latency rejection", () => {
-    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
-    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3_conversational")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v4")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v4_turbo")).toBe(false);
     expect(
       elevenLabsStreamUrl(
         {

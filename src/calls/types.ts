@@ -32,6 +32,8 @@ export type CallRecord = {
   botRole?: string;
   calleeRole?: string;
   ttsProvider?: TtsProvider;
+  /** Effective ElevenLabs model when `ttsProvider` is elevenlabs (env default or POST override). */
+  elevenlabsModel?: string;
   ivr?: boolean;
   metadata?: Record<string, unknown>;
   voice: string;
@@ -65,6 +67,7 @@ export type PublicCall = {
   ttsProvider: TtsProvider;
   voice: string;
   grokVoice?: string;
+  elevenlabsModel?: string;
   ivr: boolean;
   model: string;
   telnyx: {
@@ -104,6 +107,7 @@ export function toPublicCall(call: CallRecord): PublicCall {
     ...(call.endedAt !== undefined ? { endedAt: call.endedAt } : {}),
     ...(call.error !== undefined ? { error: call.error } : {}),
     ...(call.persona !== undefined ? { persona: call.persona } : {}),
+    ...(call.elevenlabsModel !== undefined ? { elevenlabsModel: call.elevenlabsModel } : {}),
     ...(ttsProviderUsesGrokVoice(call.ttsProvider ?? DEFAULT_TTS_PROVIDER)
       ? { grokVoice: call.voice }
       : {}),

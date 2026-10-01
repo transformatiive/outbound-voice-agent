@@ -2,7 +2,16 @@ export const TTS_PROVIDERS = ["grok", "elevenlabs", "openai", "gpt-live"] as con
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "gpt-live";
-export const DEFAULT_ELEVENLABS_MODEL = "eleven_v3";
+export const ELEVENLABS_MODELS = [
+  "eleven_v4",
+  "eleven_v4_turbo",
+  "eleven_v3",
+  "eleven_v3_conversational",
+] as const;
+export type ElevenLabsModel = (typeof ELEVENLABS_MODELS)[number];
+export const ELEVENLABS_MODEL_LIST = ELEVENLABS_MODELS.join(" | ");
+/** Default HTTP TTS model. After merge, Railway `ELEVENLABS_MODEL` may still be unset — this code default is v4. */
+export const DEFAULT_ELEVENLABS_MODEL: ElevenLabsModel = "eleven_v4";
 /**
  * Benedita - PT-PT (Alfa teste). 20-char voice id.
  * Letters **Ten** (not `Tn`, not `Ln`). Verified against the ElevenLabs API:
@@ -121,13 +130,13 @@ export function ttsProviderUsesGrokVoice(provider: TtsProvider): boolean {
 
 /**
  * `optimize_streaming_latency` is accepted on flash / turbo / multilingual_v2.
- * `eleven_v3` and `eleven_v3_conversational` reject it with HTTP 400
- * `unsupported_model`, which emptied the greeting cache and muted unlock.
+ * `eleven_v3*`, `eleven_v4`, and `eleven_v4_turbo` reject it with HTTP 400
+ * `unsupported_model` (do not assume turbo on v4 accepts the param).
  */
 export function elevenLabsModelSupportsOptimizeStreamingLatency(model: string): boolean {
   const m = model.trim().toLowerCase();
   if (!m) return false;
-  if (elevenLabsModelIsV3(m)) return false;
+  if (elevenLabsModelIsV3(m) || elevenLabsModelIsV4(m)) return false;
   if (m.includes("flash") || m.includes("turbo")) return true;
   if (m.includes("multilingual_v2")) return true;
   return false;
@@ -139,9 +148,28 @@ export function elevenLabsModelIsV3(model: string): boolean {
   return m === "eleven_v3" || m.startsWith("eleven_v3_");
 }
 
-/** Audio tags are v3-only; flash/turbo would speak `[warmly]` as words. */
+/** `eleven_v4` and any `eleven_v4_*` (including `eleven_v4_turbo`). */
+export function elevenLabsModelIsV4(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  return m === "eleven_v4" || m.startsWith("eleven_v4_");
+}
+
+/** Audio tags on v3 and v4 families; flash/turbo v2 would speak `[warmly]` as words. */
 export function elevenLabsModelSupportsAudioTags(model: string): boolean {
-  return elevenLabsModelIsV3(model);
+  return elevenLabsModelIsV3(model) || elevenLabsModelIsV4(model);
+}
+
+/** Per-call `elevenlabs_model` on POST /api/outbound. Omitted → env / code default. */
+export function parseElevenLabsModel(
+  value: unknown,
+): { ok: true; value?: ElevenLabsModel } | { ok: false } {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true };
+  }
+  if (typeof value !== "string") return { ok: false };
+  const normalized = value.trim().toLowerCase();
+  if (!(ELEVENLABS_MODELS as readonly string[]).includes(normalized)) return { ok: false };
+  return { ok: true, value: normalized as ElevenLabsModel };
 }
 
 export function elevenlabsConfigFromEnv(env: Record<string, string | undefined>): ElevenLabsConfig {

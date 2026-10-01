@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
+  applyInboundPcmuVad,
   calleeTranscriptFromEvent,
   createCalleeSpeechGate,
+  createPcmuVad,
   hasPendingPostGraceUnlock,
   isNonEmptyCalleeTranscript,
   isShortCalleeGreeting,
   msSinceStreamStart,
   noteStreamStart,
+  observePcmuFrame,
   onPostGraceCheck,
   onSpeechStarted,
   onSpeechStopped,
@@ -245,5 +248,32 @@ describe("callee speech gate (waitForCallee)", () => {
     expect(pcmuPayloadLooksLikeSpeech(silence)).toBe(false);
     expect(pcmuPayloadLooksLikeSpeech(speech)).toBe(true);
     expect(pcmuPayloadLooksLikeSpeech("")).toBe(false);
+  });
+
+  it("emits speech_started / speech_stopped edges so overlapping «estou» can unlock after grace", () => {
+    const vad = createPcmuVad();
+    const gate = createCalleeSpeechGate();
+    noteStreamStart(gate, 0);
+    const silence = Buffer.alloc(160, 0xff).toString("base64");
+    const speech = Buffer.alloc(160, 0x20).toString("base64");
+    expect(observePcmuFrame(vad, silence)).toBe("none");
+    expect(observePcmuFrame(vad, speech)).toBe("none");
+    expect(observePcmuFrame(vad, speech)).toBe("speech_started");
+    const started = applyInboundPcmuVad({
+      vad: createPcmuVad(),
+      payload: speech,
+      gate,
+      waiting: true,
+      atMs: 100,
+      config,
+    });
+    expect(started).toBeUndefined();
+    const vad2 = createPcmuVad();
+    expect(observePcmuFrame(vad2, speech)).toBe("none");
+    expect(observePcmuFrame(vad2, speech)).toBe("speech_started");
+    expect(observePcmuFrame(vad2, silence)).toBe("none");
+    expect(observePcmuFrame(vad2, silence)).toBe("none");
+    expect(observePcmuFrame(vad2, silence)).toBe("none");
+    expect(observePcmuFrame(vad2, silence)).toBe("speech_stopped");
   });
 });

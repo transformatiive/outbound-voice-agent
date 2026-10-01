@@ -79,7 +79,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(pt.ok).toBe(true);
     if (!pt.ok) return;
-    expect(pt.value.greeting).toBe("Boa tarde, sou a secretária. Confirmar a marcação.");
+    expect(pt.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
     expect(pt.value.timezone).toBe("Europe/Lisbon");
 
     const gb = parseOutboundBody(
@@ -92,7 +92,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(gb.ok).toBe(true);
     if (!gb.ok) return;
-    expect(gb.value.greeting).toBe("Good morning, this is the secretary. Confirm the booking.");
+    expect(gb.value.greeting).toBe("Good morning. This is the secretary. Confirm the booking.");
 
     const us = parseOutboundBody(
       {
@@ -104,7 +104,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(us.ok).toBe(true);
     if (!us.ok) return;
-    expect(us.value.greeting).toBe("Good morning, this is the secretary. Confirm the booking.");
+    expect(us.value.greeting).toBe("Good morning. This is the secretary. Confirm the booking.");
   });
 
   it("wraps a caller-supplied persona greeting with time-of-day and purpose", () => {
@@ -112,7 +112,7 @@ describe("parseOutboundBody greeting", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value.greeting).toBe(
-      "Boa tarde, sou a secretária. Confirmar a marcação de quinta às 16h.",
+      "Boa tarde. Sou a secretária. Confirmar a marcação de quinta às 16h.",
     );
   });
 
@@ -129,7 +129,7 @@ describe("parseOutboundBody greeting", () => {
     expect(explicit.ok).toBe(true);
     if (!explicit.ok) return;
     expect(explicit.value.waitForCallee).toBe(true);
-    expect(explicit.value.greeting).toBe("Boa tarde, sou a secretária. Confirmar a marcação.");
+    expect(explicit.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
 
     const inferred = parseOutboundBody(
       {
@@ -143,7 +143,7 @@ describe("parseOutboundBody greeting", () => {
     expect(inferred.ok).toBe(true);
     if (!inferred.ok) return;
     expect(inferred.value.waitForCallee).toBe(true);
-    expect(inferred.value.greeting).toBe("Boa tarde, sou a secretária. Confirmar a marcação.");
+    expect(inferred.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
   });
 
   it("does not put ROLEPLAY objectives into the spoken greeting and honors spokenAsk", () => {
@@ -164,7 +164,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     expect(dumped.ok).toBe(true);
     if (!dumped.ok) return;
     expect(dumped.value.greeting).toBe(
-      "Boa tarde, sou a secretária da clínica. Confirmar a consulta de otorrino na segunda às 10h.",
+      "Boa tarde. Sou a secretária da clínica. Confirmar a consulta de otorrino na segunda às 10h.",
     );
     expect(dumped.value.greeting).not.toMatch(/ROLEPLAY/i);
     expect(dumped.value.greeting).not.toMatch(/quem atende/i);
@@ -183,7 +183,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     expect(withAsk.ok).toBe(true);
     if (!withAsk.ok) return;
     expect(withAsk.value.greeting).toBe(
-      "Boa tarde, sou a secretária. Confirmar a consulta de otorrino.",
+      "Boa tarde. Sou a secretária. Confirmar a consulta de otorrino.",
     );
   });
 
@@ -198,7 +198,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     expect(ok.ok).toBe(true);
     if (!ok.ok) return;
     expect(ok.value.timezone).toBe("America/New_York");
-    expect(ok.value.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite), sou a secretária\./);
+    expect(ok.value.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\./);
 
     const bad = parseOutboundBody({ ...base, timezone: "Not/A_Zone" });
     expect(bad.ok).toBe(false);
@@ -238,7 +238,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     if (!parsed.ok) return;
     expect(parsed.value.persona).toBe("secretária da empresa");
     expect(parsed.value.greeting).toBe(
-      "Boa tarde, sou a secretária da empresa. Reservar uma mesa para duas pessoas.",
+      "Boa tarde. Sou a secretária da empresa. Reservar uma mesa para duas pessoas.",
     );
     expect(parsed.value.greeting).not.toMatch(/bem-vindo/i);
   });
@@ -260,7 +260,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value.greeting).toBe(
-      "Boa tarde, sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
+      "Boa tarde. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
     );
     expect(parsed.value.greeting).not.toMatch(/Fala português/i);
     expect(parsed.value.greeting).not.toMatch(/brasileiroismos/i);
@@ -287,7 +287,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value.greeting).toMatch(/^Boa tarde, sou a assistente do Andre Barreto\./);
+    expect(parsed.value.greeting).toMatch(/^Boa tarde. Sou a assistente do Andre Barreto\./);
     expect(parsed.value.greeting).not.toMatch(/mulher de lisboa/i);
     expect(parsed.value.greeting).not.toMatch(/Ligo sobre mulher/i);
     expect(parsed.value.greeting).not.toMatch(/REGRA ABSOLUTA/i);
@@ -346,6 +346,49 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(badVoice.ok).toBe(false);
     if (badVoice.ok) return;
     expect(badVoice.error).toMatchObject({ status: 400, error: "invalid_openai_voice" });
+  });
+
+  it("accepts elevenlabs_model override on elevenlabs calls and rejects unknown models", () => {
+    const omitted = parseOutboundBody({ ...base, tts_provider: "elevenlabs" });
+    expect(omitted.ok).toBe(true);
+    if (!omitted.ok) return;
+    expect(omitted.value.elevenlabsModel).toBeUndefined();
+
+    const v4 = parseOutboundBody({
+      ...base,
+      tts_provider: "elevenlabs",
+      elevenlabs_model: "eleven_v4",
+    });
+    expect(v4.ok).toBe(true);
+    if (!v4.ok) return;
+    expect(v4.value.elevenlabsModel).toBe("eleven_v4");
+
+    const turbo = parseOutboundBody({
+      ...base,
+      tts_provider: "elevenlabs",
+      elevenlabs_model: "eleven_v4_turbo",
+    });
+    expect(turbo.ok).toBe(true);
+    if (!turbo.ok) return;
+    expect(turbo.value.elevenlabsModel).toBe("eleven_v4_turbo");
+
+    const v3 = parseOutboundBody({
+      ...base,
+      tts_provider: "elevenlabs",
+      elevenlabs_model: "eleven_v3_conversational",
+    });
+    expect(v3.ok).toBe(true);
+    if (!v3.ok) return;
+    expect(v3.value.elevenlabsModel).toBe("eleven_v3_conversational");
+
+    const bad = parseOutboundBody({
+      ...base,
+      tts_provider: "elevenlabs",
+      elevenlabs_model: "eleven_flash_v2_5",
+    });
+    expect(bad.ok).toBe(false);
+    if (bad.ok) return;
+    expect(bad.error).toMatchObject({ status: 400, error: "invalid_elevenlabs_model" });
   });
 
   it("accepts bot_role and callee_role labels", () => {

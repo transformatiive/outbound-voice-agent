@@ -243,15 +243,87 @@ function inGrace(gate: CalleeSpeechGate, atMs: number, graceMs: number): boolean
 
 /**
  * GPT-Live has no `speech_started` VAD event. G.711 μ-law silence is typically
- * 0xFF / 0x7F; a 20ms Telnyx frame with enough non-silence counts as speech.
+ * 0xFF / 0x7F. Quiet «estou?» is often near-silence in μ-law, so we also use
+ * decoded magnitude rather than only raw non-silence bytes.
  */
 export function pcmuPayloadLooksLikeSpeech(base64: string): boolean {
   if (!base64) return false;
   const bytes = Buffer.from(base64, "base64");
   if (bytes.length < 80) return false;
   let loud = 0;
+  let energetic = 0;
   for (const b of bytes) {
     if (b !== 0xff && b !== 0x7f) loud += 1;
+    if (mulawMagnitude(b) >= 180) energetic += 1;
   }
-  return loud > bytes.length * 0.25;
+  return loud > bytes.length * 0.18 || energetic > bytes.length * 0.1;
+}
+
+const MULAW_BIAS = 0x84;
+
+function mulawMagnitude(byte: number): number {
+  const u = ~byte & 0xff;
+  const exponent = (u >> 4) & 0x07;
+  const mantissa = u & 0x0f;
+  const mag = ((mantissa << 3) + MULAW_BIAS) << exponent;
+  return mag - MULAW_BIAS;
+}
+
+/** Rising/falling edges from Telnyx PCMU — GPT-Live has no speech_stopped. */
+export type PcmuVad = {
+  speaking: boolean;
+  consecutiveSpeech: number;
+  consecutiveSilence: number;
+};
+
+export type PcmuVadEdge = "none" | "speech_started" | "speech_stopped";
+
+const PCMU_START_FRAMES = 2;
+const PCMU_STOP_FRAMES = 4;
+
+export function createPcmuVad(): PcmuVad {
+  return { speaking: false, consecutiveSpeech: 0, consecutiveSilence: 0 };
+}
+
+export function observePcmuFrame(vad: PcmuVad, base64: string): PcmuVadEdge {
+  const speech = pcmuPayloadLooksLikeSpeech(base64);
+  if (speech) {
+    vad.consecutiveSpeech += 1;
+    vad.consecutiveSilence = 0;
+    if (!vad.speaking && vad.consecutiveSpeech >= PCMU_START_FRAMES) {
+      vad.speaking = true;
+      return "speech_started";
+    }
+    return "none";
+  }
+  vad.consecutiveSilence += 1;
+  vad.consecutiveSpeech = 0;
+  if (vad.speaking && vad.consecutiveSilence >= PCMU_STOP_FRAMES) {
+    vad.speaking = false;
+    return "speech_stopped";
+  }
+  return "none";
+}
+
+export function applyInboundPcmuVad(input: {
+  vad: PcmuVad;
+  payload: string;
+  gate: CalleeSpeechGate;
+  waiting: boolean;
+  atMs: number;
+  config: CalleeSpeechGateConfig;
+}): CalleeSpeechDecision | undefined {
+  const edge = observePcmuFrame(input.vad, input.payload);
+  switch (edge) {
+    case "none":
+      return undefined;
+    case "speech_started":
+      return onSpeechStarted(input.gate, input.waiting, input.atMs, input.config);
+    case "speech_stopped":
+      return onSpeechStopped(input.gate, input.waiting, input.atMs, input.config);
+    default: {
+      const _never: never = edge;
+      throw new Error(`unsupported pcmu vad edge: ${_never}`);
+    }
+  }
 }

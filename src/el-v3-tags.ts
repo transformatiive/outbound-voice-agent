@@ -1,6 +1,7 @@
 /**
- * ElevenLabs eleven_v3 / eleven_v3_conversational audio tags.
- * Bracketed cues are performance direction, not words to speak.
+ * ElevenLabs eleven_v3 / eleven_v4 audio tags (and conversational / turbo
+ * variants in those families). Bracketed cues are performance direction, not
+ * words to speak.
  *
  * | Tag        | When |
  * | ---------- | ---- |

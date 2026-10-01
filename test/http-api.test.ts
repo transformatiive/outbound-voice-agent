@@ -23,7 +23,7 @@ const config: AppConfig = {
   grokVoice: "ara",
   grokModel: "grok-voice-think-fast-2.0",
   grokVoiceSpeed: 1,
-  elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v3", configured: false },
+  elevenlabs: { apiKey: "", voiceId: "", model: "eleven_v4", configured: false },
   openai: {
     apiKey: "",
     baseUrl: "https://api.openai.com",
@@ -91,7 +91,7 @@ describe("HTTP API", () => {
       elevenlabs: {
         configured: false,
         audioPathActive: false,
-        model: "eleven_v3",
+        model: "eleven_v4",
         voiceId: "",
         voiceIdAlt: RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
         recommendedVoiceAlt: {
@@ -174,7 +174,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotUs.body.greeting).toMatch(
-      /^Good (morning|afternoon|evening), this is the secretary\. Confirm Thursday at 4pm\.$/,
+      /^Good (morning|afternoon|evening)\. This is the secretary\. Confirm Thursday at 4pm\.$/,
     );
     expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
@@ -247,7 +247,7 @@ describe("HTTP API", () => {
     expect(got.status).toBe(200);
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
     expect(got.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação de quinta às 16h\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação de quinta às 16h\.$/,
     );
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
     expect(got.body.waitForCallee).toBe(false);
@@ -336,7 +336,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${omittedPt.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotPt.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação\.$/,
     );
     expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
 
@@ -356,7 +356,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${waitMissing.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotWait.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite), sou a secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação\.$/,
     );
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
@@ -380,7 +380,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     const got = await request(app)
       .get(`/api/calls/${res.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(got.body.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite), sou a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
+    expect(got.body.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
     expect(got.body.greeting).not.toMatch(/ROLEPLAY/i);
     expect(got.body.greeting).not.toMatch(/quem atende/i);
     expect(got.body.objective).toMatch(/ROLEPLAY/);
@@ -505,7 +505,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("elevenlabs");
     expect(got.body.persona).toBe("secretária da empresa");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
     expect(got.body.voice).toBe("ara");
   });
@@ -542,14 +542,60 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(res.status).toBe(201);
     const call = store.get(res.body.id as string);
     if (!call) throw new Error("call missing");
-    for (let i = 0; i < 20 && elCalls.length === 0; i++) await Promise.resolve();
+    for (let i = 0; i < 40 && elCalls.length < 2; i++) await Promise.resolve();
     expect(elCalls.length).toBeGreaterThanOrEqual(1);
     expect(elCalls[0]?.url).toContain("NkpT2jezTenCDRKHkWiX");
     expect(elCalls[0]?.url).not.toContain("NkpT2jezTnCDRKHkWiX");
-    expect(elCalls[0]?.body).toContain(call.greeting);
-    expect(elCalls[0]?.body).toContain("[warmly]");
+    const combined = elCalls.map((c) => c.body).join("\n");
+    expect(combined).toContain("[warmly]");
+    expect(combined).toMatch(/Boa (tarde|dia|noite)|Sou a secretária|sou a secretária/);
     expect(call.greeting).not.toContain("[warmly]");
+    expect(call.elevenlabsModel).toBe("eleven_v3");
     expect(telnyx.dial).toHaveBeenCalledTimes(1);
+  });
+
+  it("echoes elevenlabs_model camelCase from POST override and defaults to the env model", async () => {
+    const withLabs = {
+      ...config,
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezTenCDRKHkWiX",
+        model: "eleven_v4",
+        configured: true,
+      },
+      ready: { ...config.ready, elevenlabs: true },
+    };
+    const { app } = createApp({
+      config: withLabs,
+      telnyx,
+      fetchImpl: async () => new Response(Buffer.alloc(160, 0x7f), { status: 200 }),
+    });
+    const body = {
+      to: "+351912345678",
+      language: "pt-PT",
+      greeting: "Olá, fala a secretária.",
+      objective: "Confirmar quinta",
+      tts_provider: "elevenlabs",
+    };
+    const def = await request(app).post("/api/outbound").set("Authorization", "Bearer test-api-key").send(body);
+    expect(def.status).toBe(201);
+    expect(def.body.elevenlabsModel).toBe("eleven_v4");
+    const health = await request(app).get("/health");
+    expect(health.body.tts.elevenlabs.model).toBe("eleven_v4");
+
+    const turbo = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, elevenlabs_model: "eleven_v4_turbo" });
+    expect(turbo.status).toBe(201);
+    expect(turbo.body.elevenlabsModel).toBe("eleven_v4_turbo");
+
+    const bad = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({ ...body, elevenlabs_model: "eleven_flash_v2_5" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toBe("invalid_elevenlabs_model");
   });
 
   it("swapping only tts_provider keeps the same dial, persona, roles, and pt-PT fields", async () => {
@@ -607,7 +653,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(elCall.body.greeting).toBe(grokCall.body.greeting);
     expect(elCall.body.persona).toBe(grokCall.body.persona);
     expect(elCall.body.objective).toBe(grokCall.body.objective);
-    expect(elCall.body.greeting).toMatch(/sou a secretária da empresa/);
+    expect(elCall.body.greeting).toMatch(/sou a secretária da empresa/i);
 
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
     const grokDial = vi.mocked(telnyx.dial).mock.calls[0]?.[0];
@@ -757,7 +803,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("openai");
     expect(got.body.voice).toBe("marin");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 
@@ -998,7 +1044,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(got.body.ttsProvider).toBe("gpt-live");
     expect(got.body.voice).toBe("marin");
     expect(got.body.model).toBe("gpt-live-1");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/);
+    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 });

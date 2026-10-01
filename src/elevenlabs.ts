@@ -17,6 +17,8 @@ export type ElevenLabsSpeakInput = {
   text: string;
   language: Language;
   signal: AbortSignal;
+  /** Per-call `elevenlabs_model` override. Falls back to env / default. */
+  model?: string;
   onHttpStart?: () => void;
   onFirstByte?: () => void;
 };
@@ -151,6 +153,7 @@ export async function* streamElevenLabsPcmu(opts: {
   text: string;
   language: Language;
   signal: AbortSignal;
+  model?: string;
   fetchImpl?: typeof fetch;
   formatCache?: ElevenLabsRequestState;
   onHttpStart?: () => void;
@@ -158,13 +161,16 @@ export async function* streamElevenLabsPcmu(opts: {
 }): AsyncGenerator<string, void, unknown> {
   const raw = opts.text.trim();
   if (!raw) return;
-  const text = elevenLabsModelSupportsAudioTags(opts.config.model)
+  const config = opts.model?.trim()
+    ? { ...opts.config, model: opts.model.trim() }
+    : opts.config;
+  const text = elevenLabsModelSupportsAudioTags(config.model)
     ? tagElevenLabsSpeech(raw)
     : raw;
   const fetchImpl = opts.fetchImpl ?? fetch;
   opts.onHttpStart?.();
   const { response, format } = await requestElevenLabsAudio({
-    config: opts.config,
+    config,
     text,
     language: opts.language,
     signal: opts.signal,
