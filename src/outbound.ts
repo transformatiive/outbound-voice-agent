@@ -1,12 +1,14 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { DEFAULT_TIMEZONE, composeSpokenGreeting, isValidTimeZone } from "./greeting.js";
+import { spokenGreetingBeats, greetingIntroCacheKey } from "./bridge/greeting-cadence.js";
 import { instructionsRequestWait, isLanguage, type Language } from "./prompt.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE, parseRoleLabel } from "./roles.js";
 import { parseOpenAIVoice } from "./openai/session.js";
 import { GPT_LIVE_VOICE_LIST, parseGptLiveVoice } from "./openai/live-session.js";
 import { GROK_VOICE_LIST, parseGrokVoice } from "./grok/session.js";
 import {
+  parseElevenLabsModel,
   parseTtsProvider,
   ttsProviderUsesOpenAISession,
   type TtsProvider,
@@ -42,6 +44,7 @@ export type OutboundBody = {
   openai_voice?: unknown;
   gpt_live_voice?: unknown;
   grok_voice?: unknown;
+  elevenlabs_model?: unknown;
   ivr?: unknown;
 };
 
@@ -73,6 +76,7 @@ export function parseOutboundBody(
         ttsProvider: TtsProvider;
         openaiVoice?: string;
         grokVoice?: string;
+        elevenlabsModel?: string;
         ivr: boolean;
       };
     }
@@ -186,6 +190,21 @@ export function parseOutboundBody(
   if (body.grok_voice !== undefined && body.grok_voice !== null && body.grok_voice !== "") {
     grokVoice = grokVoiceParsed.value;
   }
+  let elevenlabsModel: string | undefined;
+  if (ttsProviderParsed.value === "elevenlabs") {
+    const modelParsed = parseElevenLabsModel(body.elevenlabs_model);
+    if (!modelParsed.ok) {
+      return {
+        ok: false,
+        error: {
+          status: 400,
+          error: "invalid_elevenlabs_model",
+          details: "elevenlabs_model must be eleven_v4 | eleven_v4_turbo | eleven_v3 | eleven_v3_conversational",
+        },
+      };
+    }
+    if (modelParsed.value) elevenlabsModel = modelParsed.value;
+  }
   let timezone = DEFAULT_TIMEZONE;
   if (body.timezone !== undefined && body.timezone !== null && body.timezone !== "") {
     if (typeof body.timezone !== "string" || !isValidTimeZone(body.timezone.trim())) {
@@ -235,6 +254,7 @@ export function parseOutboundBody(
       ivr,
       ...(openaiVoice ? { openaiVoice } : {}),
       ...(grokVoice ? { grokVoice } : {}),
+      ...(elevenlabsModel ? { elevenlabsModel } : {}),
       ...(personaRaw ? { persona: personaRaw } : {}),
       ...(extra ? { extraInstructions: extra } : {}),
       ...(metadata ? { metadata } : {}),
@@ -319,6 +339,9 @@ export async function placeOutboundCall(opts: {
     ttsProvider: parsed.value.ttsProvider,
     ...(parsed.value.persona ? { persona: parsed.value.persona } : {}),
     ...(parsed.value.ivr ? { ivr: true } : {}),
+    ...(parsed.value.ttsProvider === "elevenlabs"
+      ? { elevenlabsModel: parsed.value.elevenlabsModel ?? opts.config.elevenlabs.model }
+      : {}),
     voice: spokenVoice,
     model,
     streamToken,
@@ -385,17 +408,29 @@ export async function placeOutboundCall(opts: {
     opts.greetingAudioCache
   ) {
     const tts = opts.elevenLabsTts ?? createElevenLabsTts(opts.config.elevenlabs, opts.fetchImpl ?? fetch);
+    const beats = spokenGreetingBeats(call.greeting);
+    const elModel = call.elevenlabsModel;
     console.info(`[call ${call.id}] el_latency stage=prefetch_start turn=greeting source=dial`);
     opts.greetingAudioCache.startIfNeeded({
       callId: call.id,
-      text: call.greeting,
+      text: beats.opening || call.greeting,
       language: call.language,
       tts,
+      ...(elModel ? { model: elModel } : {}),
       onHttpStart: () =>
         console.info(`[call ${call.id}] el_latency stage=el_http_start turn=greeting source=dial`),
       onFirstByte: () =>
         console.info(`[call ${call.id}] el_latency stage=el_first_byte turn=greeting source=dial`),
     });
+    if (beats.intro) {
+      opts.greetingAudioCache.startIfNeeded({
+        callId: greetingIntroCacheKey(call.id),
+        text: beats.intro,
+        language: call.language,
+        tts,
+        ...(elModel ? { model: elModel } : {}),
+      });
+    }
   }
 
   try {

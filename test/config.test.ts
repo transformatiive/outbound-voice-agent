@@ -75,13 +75,17 @@ describe("config", () => {
     expect(DEFAULT_ELEVENLABS_VOICE_ID).toHaveLength(20);
     expect(RECOMMENDED_ELEVENLABS_VOICE_ID_ALT).toBe("nJ5NFqyKb8kn9JBPmo6i");
     expect(RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME).toBe("Joana");
-    expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v3");
+    expect(DEFAULT_ELEVENLABS_MODEL).toBe("eleven_v4");
     expect(DEFAULT_ELEVENLABS_OPTIMIZE_STREAMING_LATENCY).toBe(3);
     expect(DEFAULT_ELEVENLABS_VAD_SILENCE_MS).toBe(130);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3")).toBe(false);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v3_conversational")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v4")).toBe(false);
+    expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_v4_turbo")).toBe(false);
     expect(elevenLabsModelSupportsAudioTags("eleven_v3")).toBe(true);
     expect(elevenLabsModelSupportsAudioTags("eleven_v3_conversational")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v4")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v4_turbo")).toBe(true);
     expect(elevenLabsModelSupportsAudioTags("eleven_flash_v2_5")).toBe(false);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_flash_v2_5")).toBe(true);
     expect(elevenLabsModelSupportsOptimizeStreamingLatency("eleven_turbo_v2_5")).toBe(true);

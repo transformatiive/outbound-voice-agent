@@ -117,10 +117,10 @@ export function gptLiveGreetingEventId(callId: string): string {
 export function gptLiveGreetingSpeakInstructions(language: Language, greeting: string): string {
   switch (language) {
     case "pt-PT":
-      return `A tua primeira fala nesta chamada é, palavra por palavra, em português europeu de Portugal (Lisboa, pt-PT — nunca brasileiro), exactamente este texto e nada mais. Diz já, sem esperar pelo destinatário; depois fica a escutar:\n\n«${greeting}»`;
+      return `A tua fala agora é, palavra por palavra, em português europeu de Portugal (Lisboa, pt-PT — nunca brasileiro), exactamente este texto e nada mais. Diz já, com voz humana (não IVR); depois PARA e escuta:\n\n«${greeting}»`;
     case "en-GB":
     case "en-US":
-      return `Your first spoken line on this call is, verbatim, exactly this text and nothing else. Speak it now without waiting for the caller, then listen:\n\n"${greeting}"`;
+      return `Your spoken line now is, verbatim, exactly this text and nothing else. Speak it with a human phone voice (not an IVR), then stop and listen:\n\n"${greeting}"`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -257,6 +257,32 @@ export function gptLiveBackendTools(): GptLiveFunctionTool[] {
   return [END_CALL_TOOL, SEND_DTMF_TOOL];
 }
 
+/**
+ * ChatGPT Voice–style delivery for `tts_provider=gpt-live` only.
+ * Lives in session.instructions — never in `persona` (persona is a spoken title
+ * and can leak into the TTS greeting).
+ */
+export function gptLiveExpressiveVoiceInstructions(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return `# Voz (ChatGPT Voice — esta sessão live)
+Falas como uma pessoa real ao telefone, não como um IVR nem como quem lê um guião. Varia o ritmo e a entoação: sobe na saudação, desce nas confirmações, acentua a pergunta. Hesitações naturais e breves quando fizer sentido («hmm», «certo», «pois»). Empatia curta se a pessoa hesitar, recusar ou parecer ocupada — uma frase, não um discurso.
+PROIBIDO tom de menu automático / IVR. PROIBIDO voz plana de robô. PROIBIDO encadear um parágrafo.
+Turnos curtos: uma frase. Depois PARA e escuta. Não faças duas perguntas no mesmo fôlego. O ritmo humano vem da entoação e das pausas — NÃO aceleres a fala (não há speed; fica natural ~1.0).
+Língua: só português europeu de Portugal (Lisboa, pt-PT). Zero português do Brasil: nunca «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?».`;
+    case "en-GB":
+    case "en-US":
+      return `# Voice (ChatGPT Voice — this live session)
+Speak like a real person on the phone, not an IVR or a script reader. Vary rhythm and intonation. Brief natural hesitations (“hmm”, “right”) when they fit. Short empathy if they hesitate, decline, or sound busy — one sentence, not a speech.
+FORBIDDEN: IVR / script-reading tone. FORBIDDEN: a flat robot voice. FORBIDDEN: dumping a paragraph.
+Short turns: one sentence. Then STOP and listen. Do not stack two questions in one breath. Human pace comes from intonation and pauses — do not speed up (no playback-rate knob; stay natural ~1.0).`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
 export function buildGptLiveInstructions(input: {
   language: Language;
   greeting: string;
@@ -271,13 +297,16 @@ export function buildGptLiveInstructions(input: {
   const timeGreeting = timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
   const botRole = input.botRole?.trim() || DEFAULT_BOT_ROLE;
   const calleeRole = input.calleeRole?.trim() || DEFAULT_CALLEE_ROLE;
+  const expressive = gptLiveExpressiveVoiceInstructions(input.language);
   switch (input.language) {
     case "pt-PT":
       return `És a pessoa que LIGOU esta chamada (${botRole}) a pedir uma mesa / marcação. O destinatário é staff do estabelecimento (${calleeRole}). Nunca és o restaurante nem a recepção. Nunca «bem-vindo ao restaurante».
 
+${expressive}
+
 Língua: falas SEMPRE português europeu de Portugal (Lisboa, pt-PT). Hard-lock. NUNCA português do Brasil. Nunca espelhes o sotaque do interlocutor. Tratamento: 3.ª pessoa europeia («pode dizer-me», «o seu»). NUNCA «você», «Oi», «tá», «né», «celular», «ônibus», «tudo bem?». Pares: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; comboio nunca trem; casa de banho nunca banheiro.
 
-Tom: voz de telefone humana, calorosa, frases curtas. Uma pergunta de cada vez. Responde já. A saudação já começa por «${timeGreeting}». Não comeces por Olá nem Oi.
+Tom: voz de telefone humana, calorosa, frases curtas. Uma frase. PARA. Escuta. Responde já. A saudação já começa por «${timeGreeting}». Não comeces por Olá nem Oi.
 
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
 
@@ -306,7 +335,9 @@ Do not guess the result while waiting.${input.ivr ? "\n\nEsta chamada pode cair 
     case "en-US":
       return `You placed this call (${botRole}) to request a booking. The callee is venue staff (${calleeRole}). You are never the restaurant.
 
-Speak ${input.language === "en-GB" ? "British English" : "American English"} for the whole call. Short warm phone turns. One question at a time. Reply immediately. The greeting already starts with “${timeGreeting}”. Do not start with Hello.
+${expressive}
+
+Speak ${input.language === "en-GB" ? "British English" : "American English"} for the whole call. Short warm phone turns. One sentence, then stop and listen. Reply immediately. The greeting already starts with “${timeGreeting}”. Do not start with Hello.
 
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
 

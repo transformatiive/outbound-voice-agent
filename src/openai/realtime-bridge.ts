@@ -8,6 +8,8 @@ import {
   type JsonObject,
 } from "../bridge/media-bridge.js";
 import {
+  applyInboundPcmuVad,
+  createPcmuVad,
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
@@ -23,7 +25,13 @@ import {
   type CalleeSpeechDecision,
   type CalleeSpeechGate,
   type CalleeSpeechGateConfig,
+  type PcmuVad,
 } from "../bridge/callee-speech.js";
+import {
+  DEFAULT_POST_OPENING_PAUSE_MS,
+  pcmuSilenceFrames,
+  spokenGreetingBeats,
+} from "../bridge/greeting-cadence.js";
 import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "../grok/session.js";
 import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
@@ -49,6 +57,7 @@ export type OpenAIMediaBridgeOptions = {
   onEnded?: (call: CallRecord) => void;
   now?: () => string;
   clockMs?: () => number;
+  postOpeningPauseMs?: number;
 };
 
 /**
@@ -101,8 +110,15 @@ export class OpenAIMediaBridge {
   private readonly handledToolCalls = new Set<string>();
   private closed = false;
   private inboundMediaFrames = 0;
+  private inboundBeforeReady: string[] = [];
   private waitForCalleeStallLogged = false;
   private waitForCalleeNeverUnlockedLogged = false;
+  private readonly pcmuVad: PcmuVad;
+  private readonly postOpeningPauseMs: number;
+  private pendingGreetingIntro = "";
+  private greetingIntroRequested = false;
+  private introChunks: string[] = [];
+  private greetingPauseEmitted = false;
 
   constructor(opts: OpenAIMediaBridgeOptions) {
     this.call = opts.call;
@@ -123,6 +139,9 @@ export class OpenAIMediaBridge {
     this.onEnded = opts.onEnded;
     this.now = opts.now ?? (() => new Date().toISOString());
     this.clockMs = opts.clockMs ?? Date.now;
+    this.pcmuVad = createPcmuVad();
+    this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
+    this.pendingGreetingIntro = spokenGreetingBeats(this.call.greeting).intro;
   }
 
   attachTelnyx(sendTelnyx: (event: JsonObject) => void): void {
@@ -193,10 +212,22 @@ export class OpenAIMediaBridge {
     if (this.greetingRequested || this.greetingDone) return;
     this.greetingRequested = true;
     this.greetingGeneration += 1;
+    const beats = spokenGreetingBeats(this.call.greeting);
+    this.pendingGreetingIntro = beats.intro;
     this.sendOpenAI(openaiGreetingResponseCreate({
       callId: this.call.id,
       language: this.call.language,
-      greeting: this.call.greeting,
+      greeting: beats.opening || this.call.greeting,
+    }) as unknown as JsonObject);
+  }
+
+  private requestGreetingIntroAudio(): void {
+    if (this.greetingIntroRequested || !this.pendingGreetingIntro) return;
+    this.greetingIntroRequested = true;
+    this.sendOpenAI(openaiGreetingResponseCreate({
+      callId: `${this.call.id}-intro`,
+      language: this.call.language,
+      greeting: this.pendingGreetingIntro,
     }) as unknown as JsonObject);
   }
 
@@ -236,7 +267,25 @@ export class OpenAIMediaBridge {
         const payload = media?.payload;
         if (typeof payload === "string" && payload.length > 0) {
           this.inboundMediaFrames += 1;
-          this.sendOpenAI({ type: "input_audio_buffer.append", audio: payload });
+          if (this.sessionReady) {
+            this.sendOpenAI({ type: "input_audio_buffer.append", audio: payload });
+          } else {
+            this.inboundBeforeReady.push(payload);
+            if (this.inboundBeforeReady.length > 150) this.inboundBeforeReady.shift();
+          }
+          const waiting = this.isWaitingForCalleeSpeech();
+          const decision = applyInboundPcmuVad({
+            vad: this.pcmuVad,
+            payload,
+            gate: this.calleeGate,
+            waiting,
+            atMs: this.clockMs(),
+            config: this.calleeSpeechConfig,
+          });
+          if (decision && waiting) {
+            this.logCalleeGate(decision, "pcmu_vad");
+            if (decision.unlock) this.speakGreeting();
+          }
         }
         this.maybeUnlockAfterGrace("media");
         this.maybeLogWaitForCalleeStall();
@@ -424,6 +473,12 @@ export class OpenAIMediaBridge {
     this.sessionReady = true;
     const waiters = this.readyWaiters.splice(0);
     for (const waiter of waiters) waiter.resolve();
+    if (this.inboundBeforeReady.length > 0) {
+      for (const audio of this.inboundBeforeReady) {
+        this.sendOpenAI({ type: "input_audio_buffer.append", audio });
+      }
+      this.inboundBeforeReady = [];
+    }
   }
 
   private rejectReadyWaiters(err: Error): void {
@@ -476,6 +531,11 @@ export class OpenAIMediaBridge {
 
   private onResponseDone(event: JsonObject): void {
     if (this.isGreetingResponse(event) || (!this.greetingDone && this.greetingRequested)) {
+      if (this.pendingGreetingIntro && !this.greetingIntroRequested) {
+        this.requestGreetingIntroAudio();
+        this.openaiResponsePending = false;
+        return;
+      }
       this.greetingDone = true;
       this.openaiResponsePending = false;
       this.turnAudio.done = true;
@@ -501,7 +561,8 @@ export class OpenAIMediaBridge {
     if (typeof delta !== "string" || delta.length === 0) return;
     const greeting = this.isGreetingResponse(event) || (!this.greetingDone && this.greetingRequested);
     if (greeting) {
-      this.greetingChunks.push(delta);
+      if (this.greetingIntroRequested) this.introChunks.push(delta);
+      else this.greetingChunks.push(delta);
       this.flushGreetingIfReady();
       return;
     }
@@ -515,14 +576,35 @@ export class OpenAIMediaBridge {
 
   private flushGreetingIfReady(): void {
     if (!this.telnyxAttached || !this.greetingSent || this.suppressAssistantAudio) return;
-    if (this.greetingChunks.length === 0) return;
     const generation = this.greetingGeneration;
-    for (const chunk of this.greetingChunks) {
-      if (generation !== this.greetingGeneration || this.suppressAssistantAudio) return;
-      this.noteTurnAudio(chunk);
-      this.sendTelnyx({ event: "media", media: { payload: chunk } });
+    if (this.greetingChunks.length > 0) {
+      for (const chunk of this.greetingChunks) {
+        if (generation !== this.greetingGeneration || this.suppressAssistantAudio) return;
+        this.noteTurnAudio(chunk);
+        this.sendTelnyx({ event: "media", media: { payload: chunk } });
+      }
+      this.greetingChunks = [];
     }
-    this.greetingChunks = [];
+    if (this.pendingGreetingIntro) {
+      if (!this.greetingPauseEmitted) {
+        this.greetingPauseEmitted = true;
+        if (this.postOpeningPauseMs > 0) {
+          for (const chunk of pcmuSilenceFrames(this.postOpeningPauseMs)) {
+            this.noteTurnAudio(chunk);
+            this.sendTelnyx({ event: "media", media: { payload: chunk } });
+          }
+        }
+      }
+      if (!this.greetingIntroRequested) this.requestGreetingIntroAudio();
+    }
+    if (this.introChunks.length > 0) {
+      for (const chunk of this.introChunks) {
+        if (generation !== this.greetingGeneration || this.suppressAssistantAudio) return;
+        this.noteTurnAudio(chunk);
+        this.sendTelnyx({ event: "media", media: { payload: chunk } });
+      }
+      this.introChunks = [];
+    }
     if (this.greetingDone) this.maybeFinishGreetingPlayback();
   }
 
@@ -535,6 +617,7 @@ export class OpenAIMediaBridge {
   private bargeIn(): void {
     this.suppressUntilNextCalleeSpeech = false;
     this.greetingChunks = [];
+    this.introChunks = [];
     this.greetingGeneration += 1;
     if (this.telnyxAttached) this.sendTelnyx({ event: "clear" });
     this.sendOpenAI({ type: "output_audio_buffer.clear" });
@@ -558,6 +641,7 @@ export class OpenAIMediaBridge {
     if (this.greetingResponseId && responseId && responseId === this.greetingResponseId) return true;
     const eventId = typeof event.event_id === "string" ? event.event_id : "";
     if (eventId === `greeting-${this.call.id}`) return true;
+    if (eventId === `greeting-${this.call.id}-intro`) return true;
     const response = event.response as JsonObject | undefined;
     const metadata = response?.metadata as JsonObject | undefined;
     if (metadata?.purpose === "greeting") return true;

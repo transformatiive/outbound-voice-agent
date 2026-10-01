@@ -66,6 +66,9 @@ describe("prompt / language", () => {
     expect(text).toMatch(/número de pessoas/);
     expect(text).toMatch(/calorosa/);
     expect(text).toMatch(/exactamente uma vez/);
+    expect(text).toMatch(/PARA e escuta/);
+    expect(text).toMatch(/Mesmo a meio da chamada: zero pt-BR/);
+    expect(text).not.toMatch(/ChatGPT Voice/);
     assertNoSpokenBranding(text);
   });
 

@@ -114,11 +114,11 @@ export function composeSpokenGreeting(input: {
     ...(greetingAskFallback ? { fallbackText: greetingAskFallback } : {}),
   });
 
-  // Always the Lisbon (or requested-zone) clock + identity. Never keep a stale
-  // «boa tarde» from the persona when it is already «Boa noite» locally.
+  // Time-of-day as its own sentence so playback can pause / listen before identity.
+  // Never keep a stale «boa tarde» from the persona when it is already «Boa noite» locally.
   const identityOnly = stripLeadingTime(stripLeadingHello(persona)).replace(/[.!?…]+$/u, "").trim();
   let spoken = identityOnly
-    ? ensureSentence(`${timeGreeting}, ${lowerFirst(identityOnly)}`)
+    ? `${ensureSentence(timeGreeting)} ${ensureSentence(capitalizeFirst(identityOnly))}`
     : ensureSentence(timeGreeting);
 
   if (ask && !containsPurpose(spoken, ask)) {

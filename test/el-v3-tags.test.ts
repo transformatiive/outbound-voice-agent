@@ -41,11 +41,13 @@ describe("ElevenLabs v3 audio tags", () => {
     expect(inferElevenLabsSpeechMoment("Certo, mesa para duas.")).toBe("neutral");
   });
 
-  it("enables tags on eleven_v3 and eleven_v3_conversational only", () => {
+  it("enables tags on eleven_v3 and eleven_v4 families, not flash v2", () => {
     expect(elevenLabsModelIsV3("eleven_v3")).toBe(true);
     expect(elevenLabsModelIsV3("eleven_v3_conversational")).toBe(true);
     expect(elevenLabsModelSupportsAudioTags("eleven_v3")).toBe(true);
     expect(elevenLabsModelSupportsAudioTags("eleven_v3_conversational")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v4")).toBe(true);
+    expect(elevenLabsModelSupportsAudioTags("eleven_v4_turbo")).toBe(true);
     expect(elevenLabsModelSupportsAudioTags("eleven_flash_v2_5")).toBe(false);
     expect(elevenLabsModelIsV3("eleven_flash_v2_5")).toBe(false);
   });

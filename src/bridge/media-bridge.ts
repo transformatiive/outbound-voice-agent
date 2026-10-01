@@ -20,6 +20,8 @@ import {
 import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 import {
+  applyInboundPcmuVad,
+  createPcmuVad,
   DEFAULT_CALLEE_MIN_SPEECH_MS,
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
@@ -35,7 +37,14 @@ import {
   type CalleeSpeechDecision,
   type CalleeSpeechGate,
   type CalleeSpeechGateConfig,
+  type PcmuVad,
 } from "./callee-speech.js";
+import {
+  DEFAULT_POST_OPENING_PAUSE_MS,
+  greetingIntroCacheKey,
+  pcmuSilenceFrames,
+  spokenGreetingBeats,
+} from "./greeting-cadence.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -77,6 +86,8 @@ export type MediaBridgeOptions = {
   greetingAudioCache?: GreetingAudioCache;
   /** False until Telnyx media is attached so dial-time warmup cannot leak PCMU during ring. */
   outputReady?: boolean;
+  /** Silence after the time-of-day opening. 0 skips the listen pause (tests). */
+  postOpeningPauseMs?: number;
 };
 
 export class MediaBridge {
@@ -126,6 +137,8 @@ export class MediaBridge {
   private outputReady: boolean;
   private pendingSpeak = false;
   private lastSpeechStoppedAtMs: number | undefined;
+  private readonly pcmuVad: PcmuVad;
+  private readonly postOpeningPauseMs: number;
   private elTrace: ElLatencyTrace | undefined;
   private turnAudio: { playMs: number; firstDeltaAtMs: number | undefined; done: boolean } = {
     playMs: 0,
@@ -162,6 +175,8 @@ export class MediaBridge {
     this.greetingAudioCache = opts.greetingAudioCache ?? new GreetingAudioCache();
     this.outputReady = opts.outputReady ?? true;
     this.pendingSpeak = false;
+    this.pcmuVad = createPcmuVad();
+    this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
     this.primeGreetingGeneration();
   }
 
@@ -301,6 +316,19 @@ export class MediaBridge {
         if (typeof payload === "string" && payload.length > 0) {
           this.inboundMediaFrames += 1;
           this.sendGrok({ type: "input_audio_buffer.append", audio: payload });
+          const waiting = this.isWaitingForCalleeSpeech();
+          const decision = applyInboundPcmuVad({
+            vad: this.pcmuVad,
+            payload,
+            gate: this.calleeGate,
+            waiting,
+            atMs: this.clockMs(),
+            config: this.calleeSpeechConfig,
+          });
+          if (decision && waiting) {
+            this.logCalleeGate(decision, "pcmu_vad");
+            if (decision.unlock) this.speakGreeting();
+          }
         }
         this.maybeUnlockAfterGrace("media");
         this.maybeLogWaitForCalleeStall();
@@ -815,19 +843,43 @@ export class MediaBridge {
     if (rest && opts.responseId) this.ensureTailPrefetch(this.elPendingTail, opts.responseId);
   }
 
+  private emitGreetingPause(): void {
+    if (this.postOpeningPauseMs <= 0) return;
+    for (const chunk of pcmuSilenceFrames(this.postOpeningPauseMs)) {
+      this.noteTurnAudio(chunk);
+      this.sendTelnyx({ event: "media", media: { payload: chunk } });
+    }
+  }
+
+  private elevenLabsSpeakModel(): string | undefined {
+    return this.call.elevenlabsModel;
+  }
+
   private ensureGreetingPrefetch(): void {
     if (!this.wantsElevenLabsPlayback() || !this.elevenLabsTts) return;
-    const text = this.call.greeting.trim();
+    const beats = spokenGreetingBeats(this.call.greeting);
+    const text = (beats.opening || this.call.greeting).trim();
     if (!text) return;
     if (!this.elTrace) this.beginElTrace("greeting");
+    const model = this.elevenLabsSpeakModel();
     this.greetingAudioCache.startIfNeeded({
       callId: this.call.id,
       text,
       language: this.call.language,
       tts: this.elevenLabsTts,
+      ...(model ? { model } : {}),
       onHttpStart: () => this.noteElHttpStart(),
       onFirstByte: () => this.noteElFirstByte(),
     });
+    if (beats.intro) {
+      this.greetingAudioCache.startIfNeeded({
+        callId: greetingIntroCacheKey(this.call.id),
+        text: beats.intro,
+        language: this.call.language,
+        tts: this.elevenLabsTts,
+        ...(model ? { model } : {}),
+      });
+    }
   }
 
   private ensureTailPrefetch(text: string, responseId: string): void {
@@ -844,10 +896,12 @@ export class MediaBridge {
     this.elTailPrefetch?.buffer.abort.abort();
     const buffer = new PcmuFrameBuffer();
     this.elTailPrefetch = { text: trimmed, responseId, buffer };
+    const model = this.elevenLabsSpeakModel();
     void fillPcmuFrameBuffer(buffer, {
       tts: this.elevenLabsTts,
       text: trimmed,
       language: this.call.language,
+      ...(model ? { model } : {}),
     });
   }
 
@@ -874,7 +928,17 @@ export class MediaBridge {
     this.elAbort?.abort();
     this.elAbort = undefined;
     const cacheStatus = entry.frames.length > 0 ? "hit" : "prefetch";
-    await this.drainPcmuBuffer(entry.buffer, { isGreeting: true, cacheStatus });
+    const introKey = greetingIntroCacheKey(this.call.id);
+    const intro = this.greetingAudioCache.get(introKey);
+    await this.drainPcmuBuffer(entry.buffer, {
+      isGreeting: true,
+      cacheStatus,
+      completeGreeting: !intro,
+    });
+    if (intro) {
+      this.emitGreetingPause();
+      await this.drainPcmuBuffer(intro.buffer, { isGreeting: true, cacheStatus, completeGreeting: true });
+    }
     if (entry.failed && entry.frames.length === 0 && this.elevenLabsTts) {
       console.warn(
         `[bridge ${this.call.id}] elevenlabs greeting cache still empty after drain; retrying live TTS`,
@@ -933,10 +997,12 @@ export class MediaBridge {
     }
     const buffer = new PcmuFrameBuffer();
     abort.signal.addEventListener("abort", () => buffer.abort.abort());
+    const model = this.elevenLabsSpeakModel();
     void fillPcmuFrameBuffer(buffer, {
       tts: this.elevenLabsTts,
       text: trimmed,
       language: this.call.language,
+      ...(model ? { model } : {}),
       onHttpStart: () => this.noteElHttpStart(),
       onFirstByte: () => this.noteElFirstByte(),
     });
@@ -951,6 +1017,7 @@ export class MediaBridge {
     buffer: PcmuFrameBuffer,
     opts: {
       isGreeting?: boolean;
+      completeGreeting?: boolean;
       responseId?: string;
       cacheStatus?: "hit" | "prefetch" | "live";
     },
@@ -992,8 +1059,10 @@ export class MediaBridge {
         this.turnAudio.done = true;
         this.flushResponseDoneWaiters();
         if (opts.isGreeting === true || this.greetingPlaying) {
-          this.greetingElDone = true;
-          this.maybeFinishGreetingPlayback();
+          if (opts.completeGreeting !== false) {
+            this.greetingElDone = true;
+            this.maybeFinishGreetingPlayback();
+          }
         }
         const tail = this.elPendingTail;
         this.elPendingTail = "";

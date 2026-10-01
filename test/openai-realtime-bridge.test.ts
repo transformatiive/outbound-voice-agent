@@ -56,7 +56,7 @@ describe("OpenAI Realtime media bridge", () => {
     expect(openaiSend.mock.calls.some((c) => c[0]?.type === "conversation.item.create")).toBe(true);
   });
 
-  it("forwards Telnyx PCMU to OpenAI input_audio_buffer.append", () => {
+  it("buffers inbound PCMU until session.updated, then flushes to input_audio_buffer.append", async () => {
     const openaiSend = vi.fn();
     const bridge = new OpenAIMediaBridge({
       call: sampleCall(),
@@ -68,6 +68,8 @@ describe("OpenAI Realtime media bridge", () => {
       event: "media",
       media: { track: "inbound", payload: "QUJDRA==" },
     });
+    expect(openaiSend.mock.calls.some((c) => c[0]?.type === "input_audio_buffer.append")).toBe(false);
+    await bridge.onOpenAIEvent({ type: "session.updated" });
     expect(openaiSend).toHaveBeenCalledWith({ type: "input_audio_buffer.append", audio: "QUJDRA==" });
   });
 

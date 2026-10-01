@@ -3,6 +3,7 @@ import {
   GPT_LIVE_BRAZILIAN_VOICES,
   buildGptLiveBackendInstructions,
   buildGptLiveInstructions,
+  gptLiveExpressiveVoiceInstructions,
   gptLiveGreetingSpeakInstructions,
   gptLiveSessionStartPayload,
   openaiLiveUrl,
@@ -28,6 +29,12 @@ describe("GPT-Live session", () => {
     expect(payload.session.audio.format).toEqual({ type: "audio/pcmu", rate: 8000 });
     expect(payload.session.audio.output.voice).toBe(DEFAULT_GPT_LIVE_VOICE);
     expect(payload.session.audio.output).toEqual({ voice: DEFAULT_GPT_LIVE_VOICE });
+    expect(payload.session.audio.output).not.toHaveProperty("speed");
+    expect(payload.session.instructions).toMatch(/ChatGPT Voice/);
+    expect(payload.session.instructions).toMatch(/«hmm»/);
+    expect(payload.session.instructions).toMatch(/IVR/);
+    expect(payload.session.instructions).toMatch(/uma frase/i);
+    expect(payload.session.instructions).toMatch(/PARA e escuta/);
     expect(GPT_LIVE_BRAZILIAN_VOICES).not.toContain(payload.session.audio.output.voice);
     expect(payload.session.instructions).toMatch(/português europeu/i);
     expect(payload.session.instructions).toMatch(/NUNCA português do Brasil/);
@@ -50,6 +57,9 @@ describe("GPT-Live session", () => {
     });
     expect(live).toMatch(/português europeu de Portugal/);
     expect(live).toMatch(/telemóvel nunca celular/);
+    expect(live).toMatch(/ChatGPT Voice/);
+    expect(live).toMatch(/«certo»/);
+    expect(live).toMatch(/PROIBIDO tom de menu automático/);
     expect(live.startsWith("You are")).toBe(false);
     const backend = buildGptLiveBackendInstructions({
       language: "pt-PT",
@@ -58,6 +68,28 @@ describe("GPT-Live session", () => {
     });
     expect(backend).toMatch(/então fica marcado para|recap/i);
     expect(gptLiveGreetingSpeakInstructions("pt-PT", "Boa tarde.")).toMatch(/português europeu/i);
+  });
+
+  it("keeps ChatGPT Voice delivery in session.instructions only — no persona field, no speed", () => {
+    const expressive = gptLiveExpressiveVoiceInstructions("pt-PT");
+    expect(expressive).toMatch(/«hmm»/);
+    expect(expressive).toMatch(/«certo»/);
+    expect(expressive).toMatch(/PROIBIDO tom de menu automático/);
+    expect(expressive).toMatch(/uma frase/i);
+    expect(expressive).toMatch(/PARA e escuta/);
+    expect(expressive).toMatch(/pt-PT/);
+    expect(expressive).toMatch(/Zero português do Brasil/);
+    const payload = gptLiveSessionStartPayload({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      objective: "Marcar mesa",
+    });
+    expect(payload.session.instructions).toContain(expressive);
+    expect(payload.session).not.toHaveProperty("persona");
+    expect(JSON.stringify(payload)).not.toMatch(/"persona"/);
+    expect(payload.session.audio.output).toEqual({ voice: DEFAULT_GPT_LIVE_VOICE });
+    expect(payload.session.audio.output).not.toHaveProperty("speed");
+    expect(payload.session.delegation.responses.instructions).not.toContain(expressive);
   });
 
   it("parses GPT-Live voices including marin and rejects unknown names", () => {
