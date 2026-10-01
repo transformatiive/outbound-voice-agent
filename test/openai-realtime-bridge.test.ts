@@ -83,6 +83,7 @@ describe("OpenAI Realtime media bridge", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
     bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
     await bridge.onOpenAIEvent({ type: "session.updated" });
     await bridge.onOpenAIEvent({
       type: "response.created",
@@ -200,6 +201,7 @@ describe("OpenAI Realtime media bridge", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
     bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
     bridge.configureSession();
     const first = openaiSend.mock.calls.find((c) => c[0]?.type === "session.update")?.[0] as {
       session: { audio: { input: { turn_detection: { create_response: boolean } } } };
@@ -230,6 +232,7 @@ describe("OpenAI Realtime media bridge", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
     });
     bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
     await bridge.onOpenAIEvent({ type: "session.updated" });
     await bridge.onOpenAIEvent({
       type: "response.created",

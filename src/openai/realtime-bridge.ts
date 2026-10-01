@@ -88,6 +88,8 @@ export class OpenAIMediaBridge {
   private sessionFailed: Error | undefined;
   private readonly readyWaiters: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
   private telnyxAttached = false;
+  private streamStarted = false;
+  private callAnswered = false;
   private greetingSent = false;
   private greetingPlaying = false;
   private greetingRequested = false;
@@ -147,12 +149,21 @@ export class OpenAIMediaBridge {
   attachTelnyx(sendTelnyx: (event: JsonObject) => void): void {
     this.sendTelnyx = sendTelnyx;
     this.telnyxAttached = true;
-    if (this.call.waitForCallee !== true && this.sessionReady) this.speakGreeting();
+    if (this.call.waitForCallee !== true && this.sessionReady && this.canSpeakNow()) this.speakGreeting();
     else this.flushGreetingIfReady();
   }
 
   setOnEnded(onEnded: (call: CallRecord) => void): void {
     this.onEnded = onEnded;
+  }
+
+  notifyCallAnswered(): void {
+    this.callAnswered = true;
+    if (this.call.status === "dialing" || this.call.status === "ringing") {
+      this.call.status = "answered";
+    }
+    if (this.call.waitForCallee !== true) this.speakGreeting();
+    else this.flushGreetingIfReady();
   }
 
   failSession(err: Error): void {
@@ -257,10 +268,9 @@ export class OpenAIMediaBridge {
         return;
       case "start":
         noteStreamStart(this.calleeGate, this.clockMs());
-        if (this.call.status === "answered" || this.call.status === "dialing" || this.call.status === "ringing") {
-          this.call.status = "in_progress";
-        }
-        if (this.call.waitForCallee !== true) this.speakGreeting();
+        this.streamStarted = true;
+        if (this.call.status === "answered") this.call.status = "in_progress";
+        if (this.call.waitForCallee !== true && this.canSpeakNow()) this.speakGreeting();
         return;
       case "media": {
         const media = message.media as JsonObject | undefined;
@@ -307,7 +317,7 @@ export class OpenAIMediaBridge {
       case "session.updated":
         this.markSessionReady();
         this.requestGreetingAudio();
-        if (this.call.waitForCallee !== true && this.telnyxAttached) this.speakGreeting();
+        if (this.call.waitForCallee !== true && this.canSpeakNow()) this.speakGreeting();
         return;
       case "response.created":
         this.onResponseCreated(event);
@@ -503,6 +513,32 @@ export class OpenAIMediaBridge {
     return this.call.waitForCallee === true && !this.greetingSent;
   }
 
+  private isCalleeOnTheLine(): boolean {
+    if (this.callAnswered) return true;
+    switch (this.call.status) {
+      case "answered":
+      case "in_progress":
+        return true;
+      case "dialing":
+      case "ringing":
+      case "completed":
+      case "failed":
+      case "no_answer":
+      case "busy":
+        return false;
+      default: {
+        const _never: never = this.call.status;
+        return _never;
+      }
+    }
+  }
+
+  private canSpeakNow(): boolean {
+    if (!this.telnyxAttached) return false;
+    if (this.call.waitForCallee === true) return true;
+    return this.streamStarted && this.isCalleeOnTheLine();
+  }
+
   private onResponseCreated(event: JsonObject): void {
     const responseId = responseIdFromEvent(event);
     const isGreeting = this.isGreetingResponse(event) || (!this.greetingDone && this.greetingRequested && !this.greetingResponseId);
@@ -569,13 +605,14 @@ export class OpenAIMediaBridge {
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     if (this.suppressAssistantAudio) return;
-    if (!this.telnyxAttached) return;
+    if (!this.telnyxAttached || !this.canSpeakNow()) return;
     this.noteTurnAudio(delta);
     this.sendTelnyx({ event: "media", media: { payload: delta } });
   }
 
   private flushGreetingIfReady(): void {
     if (!this.telnyxAttached || !this.greetingSent || this.suppressAssistantAudio) return;
+    if (!this.canSpeakNow()) return;
     const generation = this.greetingGeneration;
     if (this.greetingChunks.length > 0) {
       for (const chunk of this.greetingChunks) {
