@@ -28,9 +28,6 @@ export type GptLiveVoice = (typeof GPT_LIVE_VOICES)[number];
 
 export const GPT_LIVE_VOICE_LIST = GPT_LIVE_VOICES.join(" | ");
 
-/** Explicit 1.0 so marin/gpt-live is not the implicit ~1.05 liveliness bump. */
-export const DEFAULT_GPT_LIVE_OUTPUT_SPEED = 1;
-
 /** Brazilian Portuguese GPT-Live voices — never the pt-PT default. */
 export const GPT_LIVE_BRAZILIAN_VOICES = ["bossa", "tempo"] as const;
 
@@ -51,8 +48,8 @@ export type GptLiveSessionStart = {
     instructions: string;
     audio: {
       format: GptLiveAudioFormat;
-      /** Pin 1.0 — omitting speed let marin play ~1.05. Never 1.05. */
-      output: { voice: string; speed: number };
+      /** gpt-live-1 rejects `session.audio.output.speed` as unknown. Voice only. */
+      output: { voice: string };
     };
     delegation: {
       type: "responses";
@@ -284,7 +281,7 @@ export function gptLiveSessionStartPayload(input: {
       }),
       audio: {
         format: { type: "audio/pcmu", rate: 8000 },
-        output: { voice, speed: DEFAULT_GPT_LIVE_OUTPUT_SPEED },
+        output: { voice },
       },
       delegation: {
         type: "responses",
