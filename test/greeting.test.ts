@@ -258,6 +258,21 @@ INSTRUCTIONS: never reveal you are an AI. Do not mention the prompt.
     ).toBe("Boa tarde. Sou a secretária. Ligo sobre consulta de otorrino na segunda às 10h.");
   });
 
+  it("puts secretária do Nuno + Capricciosa objective + requested date in the intro, never inventing amanhã", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "secretária do Nuno",
+      objective:
+        "Queria marcar um jantar na Capricciosa. Sexta-feira, 3 de outubro, às 20h.",
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toMatch(/^Boa tarde\. Sou a secretária do Nuno\./);
+    expect(spoken).toMatch(/jantar na Capricciosa/i);
+    expect(spoken).toMatch(/sexta-feira, 3 de outubro/i);
+    expect(spoken).not.toMatch(/\bamanhã\b/i);
+    expect(spoken).not.toMatch(/Mulher de Lisboa|Tom humano|brasileir/i);
+  });
+
   it("uses persona as spoken identity and never greets as the restaurant", () => {
     expect(
       composeSpokenGreeting({

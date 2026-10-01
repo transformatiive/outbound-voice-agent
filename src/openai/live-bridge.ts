@@ -32,9 +32,11 @@ import {
 import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
 import {
+  gptLiveConversationUnlockedAppend,
   gptLiveGreetingCommentaryAppend,
   gptLiveGreetingDeliveredThinkingAppend,
   gptLiveGreetingInstructionsAppend,
+  gptLiveReplyNowCommentaryAppend,
   gptLiveSessionStartPayload,
 } from "./live-session.js";
 
@@ -104,6 +106,7 @@ export class GptLiveMediaBridge {
   private closed = false;
   private inboundMediaFrames = 0;
   private inboundBeforeReady: string[] = [];
+  private inboundHeld: string[] = [];
   private waitForCalleeStallLogged = false;
   private waitForCalleeNeverUnlockedLogged = false;
   private readonly pcmuVad: PcmuVad;
@@ -112,6 +115,13 @@ export class GptLiveMediaBridge {
   private pendingGreetingIntro = "";
   private introChunks: string[] = [];
   private greetingPauseEmitted = false;
+  private greetingDone = false;
+  private openingFlushed = false;
+  private introAudioSeen = false;
+  private greetingOutputDones = 0;
+  private pendingReplyAfterGreeting = false;
+  private replySeq = 0;
+  private replyInFlight = false;
 
   constructor(opts: GptLiveMediaBridgeOptions) {
     this.call = opts.call;
@@ -248,13 +258,6 @@ export class GptLiveMediaBridge {
     this.flushUserTranscript();
     this.pushTranscript({ role: "assistant", text: this.call.greeting });
     if (!this.greetingRequested) this.requestGreetingAudio();
-    this.sendLive(
-      gptLiveGreetingDeliveredThinkingAppend({
-        callId: this.call.id,
-        language: this.call.language,
-        greeting: this.call.greeting,
-      }) as unknown as JsonObject,
-    );
     this.flushGreetingIfReady();
   }
 
@@ -276,7 +279,11 @@ export class GptLiveMediaBridge {
         if (typeof payload === "string" && payload.length > 0) {
           this.inboundMediaFrames += 1;
           if (this.sessionReady) {
-            this.sendLive({ type: "session.input_audio.append", audio: payload });
+            if (this.isHoldingInbound()) {
+              this.holdInbound(payload);
+            } else {
+              this.sendLive({ type: "session.input_audio.append", audio: payload });
+            }
           } else {
             this.inboundBeforeReady.push(payload);
             if (this.inboundBeforeReady.length > 150) this.inboundBeforeReady.shift();
@@ -404,8 +411,12 @@ export class GptLiveMediaBridge {
     const waiters = this.readyWaiters.splice(0);
     for (const waiter of waiters) waiter.resolve();
     if (this.inboundBeforeReady.length > 0) {
-      for (const audio of this.inboundBeforeReady) {
-        this.sendLive({ type: "session.input_audio.append", audio });
+      if (this.isHoldingInbound()) {
+        for (const audio of this.inboundBeforeReady) this.holdInbound(audio);
+      } else {
+        for (const audio of this.inboundBeforeReady) {
+          this.sendLive({ type: "session.input_audio.append", audio });
+        }
       }
       this.inboundBeforeReady = [];
     }
@@ -433,39 +444,42 @@ export class GptLiveMediaBridge {
     return this.call.waitForCallee === true && !this.greetingSent;
   }
 
+  private isHoldingInbound(): boolean {
+    return this.greetingSent && !this.greetingDone && this.telnyxAttached;
+  }
+
+  private holdInbound(payload: string): void {
+    this.inboundHeld.push(payload);
+    if (this.inboundHeld.length > 150) this.inboundHeld.shift();
+  }
+
+  private flushHeldInbound(): void {
+    if (this.inboundHeld.length === 0) return;
+    for (const audio of this.inboundHeld) {
+      this.sendLive({ type: "session.input_audio.append", audio });
+    }
+    this.inboundHeld = [];
+  }
+
   private onAudioDelta(event: JsonObject): void {
     const delta =
       typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
     if (typeof delta !== "string" || delta.length === 0) return;
-    const intoIntro = this.greetingIntroRequested;
-    if (!this.greetingSent || this.greetingPlaying) {
-      if (!this.greetingSent) {
-        if (intoIntro) this.introChunks.push(delta);
-        else this.greetingChunks.push(delta);
-        this.flushGreetingIfReady();
-        return;
+    const greetingAudio = this.greetingRequested && !this.greetingDone;
+    if (greetingAudio) {
+      if (this.greetingIntroRequested) {
+        this.introAudioSeen = true;
+        this.introChunks.push(delta);
+      } else {
+        this.greetingChunks.push(delta);
       }
-      if (this.isWaitingForCalleeSpeech()) {
-        if (intoIntro) this.introChunks.push(delta);
-        else this.greetingChunks.push(delta);
-        return;
-      }
-    }
-    if (this.isWaitingForCalleeSpeech()) {
-      if (intoIntro) this.introChunks.push(delta);
-      else this.greetingChunks.push(delta);
-      return;
-    }
-    if (!this.greetingSent) return;
-    if (!this.telnyxAttached) {
-      if (intoIntro) this.introChunks.push(delta);
-      else this.greetingChunks.push(delta);
       this.flushGreetingIfReady();
       return;
     }
-    if (this.greetingPlaying && intoIntro && !this.greetingPauseEmitted && this.pendingGreetingIntro) {
-      this.emitGreetingPause();
-    }
+    if (this.isWaitingForCalleeSpeech()) return;
+    if (!this.greetingSent) return;
+    if (!this.telnyxAttached) return;
+    this.replyInFlight = true;
     this.noteTurnAudio(delta);
     this.sendTelnyx({ event: "media", media: { payload: delta } });
   }
@@ -490,8 +504,10 @@ export class GptLiveMediaBridge {
         this.sendTelnyx({ event: "media", media: { payload: chunk } });
       }
       this.greetingChunks = [];
+      this.openingFlushed = true;
     }
     if (this.pendingGreetingIntro) {
+      if (!this.openingFlushed) return;
       this.emitGreetingPause();
       if (!this.greetingIntroRequested) this.requestGreetingIntroAudio();
     }
@@ -502,16 +518,63 @@ export class GptLiveMediaBridge {
         this.sendTelnyx({ event: "media", media: { payload: chunk } });
       }
       this.introChunks = [];
-      this.greetingPlaying = false;
+      this.introAudioSeen = true;
+      this.finishGreetingPlayback();
     } else if (!this.pendingGreetingIntro) {
-      this.greetingPlaying = false;
+      this.finishGreetingPlayback();
     }
+  }
+
+  private finishGreetingPlayback(): void {
+    if (this.greetingDone) return;
+    this.greetingPlaying = false;
+    this.greetingDone = true;
+    this.turnAudio.done = true;
+    this.sendLive(
+      gptLiveConversationUnlockedAppend({
+        callId: this.call.id,
+        language: this.call.language,
+      }) as unknown as JsonObject,
+    );
+    this.sendLive(
+      gptLiveGreetingDeliveredThinkingAppend({
+        callId: this.call.id,
+        language: this.call.language,
+        greeting: this.call.greeting,
+      }) as unknown as JsonObject,
+    );
+    this.flushHeldInbound();
+    if (this.pendingReplyAfterGreeting) {
+      this.pendingReplyAfterGreeting = false;
+      this.requestCalleeReply();
+    }
+  }
+
+  private requestCalleeReply(): void {
+    if (!this.greetingDone || this.greetingPlaying || this.hangingUp || this.closed) {
+      return;
+    }
+    if (this.replyInFlight) {
+      this.pendingReplyAfterGreeting = true;
+      return;
+    }
+    this.replyInFlight = true;
+    this.replySeq += 1;
+    this.beginTurnAudio();
+    this.sendLive(
+      gptLiveReplyNowCommentaryAppend({
+        callId: this.call.id,
+        language: this.call.language,
+        seq: this.replySeq,
+      }) as unknown as JsonObject,
+    );
   }
 
   private onInputTranscript(event: JsonObject): void {
     const delta = transcriptDelta(event);
     if (delta) this.pendingInputTranscript += delta;
     const transcript = this.pendingInputTranscript.trim();
+    const done = String(event.type ?? "").endsWith(".done");
     if (this.isWaitingForCalleeSpeech()) {
       const decision = onTranscript(true, transcript);
       this.logCalleeGate(decision, "transcript", transcript);
@@ -521,41 +584,70 @@ export class GptLiveMediaBridge {
       this.speakGreeting();
       return;
     }
-    if (this.greetingPlaying || isShortCalleeGreeting(transcript)) {
-      if (transcript) this.storePendingUser("live-input", transcript);
-      if (String(event.type ?? "").endsWith(".done")) {
+    if (transcript) this.storePendingUser("live-input", transcript);
+    if (!this.greetingDone) {
+      if (transcript && !isShortCalleeGreeting(transcript)) {
+        this.pendingReplyAfterGreeting = true;
+      }
+      if (done) {
         this.flushUserTranscript();
         this.pendingInputTranscript = "";
       }
       return;
     }
-    if (this.greetingSent && this.telnyxAttached) {
+    if (
+      !done &&
+      this.replyInFlight &&
+      this.turnAudio.firstDeltaAtMs !== undefined &&
+      !this.turnAudio.done
+    ) {
       this.sendTelnyx({ event: "clear" });
+      this.replyInFlight = false;
     }
+    if (!done) return;
+    const hadUserSpeech = Boolean(transcript);
     this.flushAssistantTranscript();
-    if (transcript) this.storePendingUser("live-input", transcript);
-    if (String(event.type ?? "").endsWith(".done")) {
-      this.flushUserTranscript();
-      this.pendingInputTranscript = "";
-    }
+    this.flushUserTranscript();
+    this.pendingInputTranscript = "";
+    if (hadUserSpeech) this.requestCalleeReply();
   }
 
   private onOutputTranscript(event: JsonObject): void {
     const done = String(event.type ?? "").endsWith(".done");
-    if (done && this.pendingGreetingIntro && !this.greetingIntroRequested) {
+    if (
+      done &&
+      this.pendingGreetingIntro &&
+      !this.greetingIntroRequested &&
+      (this.isWaitingForCalleeSpeech() || this.openingFlushed)
+    ) {
       this.requestGreetingIntroAudio();
     }
     if (this.isWaitingForCalleeSpeech()) return;
     if (!this.greetingSent) return;
     const delta = transcriptDelta(event);
-    if (this.greetingPlaying) {
-      if (done && (this.greetingIntroRequested || !this.pendingGreetingIntro)) {
-        this.greetingPlaying = false;
-      }
+    if (!this.greetingDone) {
+      if (done) this.greetingOutputDones += 1;
+      if (this.shouldFinishGreetingOnOutputDone(done)) this.finishGreetingPlayback();
       return;
     }
     if (delta) this.pendingOutputTranscript += delta;
-    if (done) this.flushAssistantTranscript();
+    if (done) {
+      this.replyInFlight = false;
+      this.turnAudio.done = true;
+      this.flushAssistantTranscript();
+      if (this.pendingReplyAfterGreeting) {
+        this.pendingReplyAfterGreeting = false;
+        this.requestCalleeReply();
+      }
+    }
+  }
+
+  private shouldFinishGreetingOnOutputDone(done: boolean): boolean {
+    if (!done) return false;
+    if (!this.pendingGreetingIntro) return true;
+    if (this.introAudioSeen && this.greetingIntroRequested) return true;
+    if (this.greetingIntroRequested && this.greetingOutputDones >= 2) return true;
+    return false;
   }
 
   private async onDelegatedResponseEvent(inner: JsonObject): Promise<void> {
