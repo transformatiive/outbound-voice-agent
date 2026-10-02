@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { GptLiveMediaBridge } from "../src/openai/live-bridge.js";
 import type { CallRecord } from "../src/calls/types.js";
+import { PCMU_SILENCE_FRAME } from "../src/bridge/greeting-cadence.js";
 
 function sampleCall(): CallRecord {
   return {
@@ -91,6 +92,7 @@ describe("GPT-Live media bridge", () => {
       sendLive: liveSend,
       sendTelnyx: vi.fn(),
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      inputAudioKeepaliveMs: 0,
     });
     bridge.onTelnyxMessage({ event: "start" });
     liveSend.mockClear();
@@ -274,7 +276,7 @@ describe("GPT-Live media bridge", () => {
     expect(telnyxSend).not.toHaveBeenCalledWith({ event: "clear" });
   });
 
-  it("holds inbound PCMU during the two-beat greeting then flushes after intro so later turns are heard", async () => {
+  it("forwards inbound PCMU during the greeting so the GPT-Live session timeline keeps moving", async () => {
     const liveSend = vi.fn();
     const telnyxSend = vi.fn();
     const bridge = new GptLiveMediaBridge({
@@ -286,6 +288,7 @@ describe("GPT-Live media bridge", () => {
       sendTelnyx: telnyxSend,
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
       postOpeningPauseMs: 0,
+      inputAudioKeepaliveMs: 0,
     });
     bridge.attachTelnyx(telnyxSend);
     bridge.onTelnyxMessage({ event: "start" });
@@ -296,11 +299,10 @@ describe("GPT-Live media bridge", () => {
       event: "media",
       media: { track: "inbound", payload: "Q0FMTEU=" },
     });
-    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.input_audio.append")).toBe(false);
+    expect(liveSend).toHaveBeenCalledWith({ type: "session.input_audio.append", audio: "Q0FMTEU=" });
     await bridge.onLiveEvent({ type: "session.output_transcript.done" });
     await bridge.onLiveEvent({ type: "session.output_audio.delta", delta: "SU5UUg==" });
     await bridge.onLiveEvent({ type: "session.output_transcript.done" });
-    expect(liveSend).toHaveBeenCalledWith({ type: "session.input_audio.append", audio: "Q0FMTEU=" });
   });
 
   it("still requests a reply when the callee speaks during the post-opening pause", async () => {
@@ -488,7 +490,7 @@ describe("GPT-Live media bridge", () => {
     expect(call.transcript).toEqual([{ role: "assistant", text: call.greeting }]);
   });
 
-  it("does not send greeting commands on session.started during prewarm (Twilio waits for the telephony stream)", async () => {
+  it("does not send greeting commands on session.started during prewarm (Telnyx start is ring)", async () => {
     const liveSend = vi.fn();
     const telnyxSend = vi.fn();
     const call = {
@@ -550,6 +552,7 @@ describe("GPT-Live media bridge", () => {
       sendTelnyx: telnyxSend,
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
       postOpeningPauseMs: 0,
+      inputAudioKeepaliveMs: 0,
     });
     bridge.attachTelnyx(telnyxSend);
     bridge.onTelnyxMessage({ event: "start" });
@@ -568,6 +571,11 @@ describe("GPT-Live media bridge", () => {
       outputAudioDeltas: 0,
       outboundMediaFrames: 0,
     });
+    const silenceAppends = liveSend.mock.calls.filter(
+      (c) => c[0]?.type === "session.input_audio.append" && c[0]?.audio === PCMU_SILENCE_FRAME,
+    );
+    expect(silenceAppends.length).toBeGreaterThan(0);
+    bridge.markEnded("callee_hangup");
   });
 
   it("logs a silent-call pipeline when the greeting is marked but no output_audio.delta arrives", async () => {
@@ -585,6 +593,7 @@ describe("GPT-Live media bridge", () => {
       telnyx: { dial: vi.fn(), hangup: vi.fn() },
       hangupDelayMs: 0,
       postOpeningPauseMs: 0,
+      inputAudioKeepaliveMs: 0,
     });
     bridge.attachTelnyx(telnyxSend);
     bridge.onTelnyxMessage({ event: "start" });
@@ -603,6 +612,7 @@ describe("GPT-Live media bridge", () => {
     expect(pipeline).toMatch(/deltas=0/);
     expect(pipeline).toMatch(/telnyx_media_frames=0/);
     expect(pipeline).toMatch(/greeting_commands=true/);
+    expect(pipeline).toMatch(/openai_events_after_greeting=/);
   });
 
   it("does not mark the greeting delivered when waitForCallee=false attach happens with no Telnyx start", async () => {
@@ -626,5 +636,95 @@ describe("GPT-Live media bridge", () => {
     expect(liveSend.mock.calls.some((c) => (c[0] as { event_id?: string }).event_id === "converse-call-1")).toBe(
       false,
     );
+  });
+
+  it("keeps GPT-Live input audio running after greeting commands so output_audio.delta can arrive", async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = {
+      ...sampleCall(),
+      status: "dialing" as const,
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+    };
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      hangupDelayMs: 0,
+      postOpeningPauseMs: 0,
+      inputAudioKeepaliveMs: 0,
+    });
+
+    await bridge.onLiveEvent({
+      type: "session.started",
+      session: { id: "live_u1_EURERp3oNEbqV7rK7XKAOVGH0emhDKpK", audio: { format: { type: "audio/pcmu", rate: 8000 } } },
+    });
+    bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
+    liveSend.mockClear();
+    bridge.onTelnyxMessage({ event: "media", media: { payload: "UklORw==" } });
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.input_audio.append")).toBe(false);
+
+    bridge.notifyCallAnswered();
+    const instruct = liveSend.mock.calls.find((c) => c[0]?.type === "session.instructions.append")?.[0] as {
+      content?: string;
+    };
+    expect(instruct?.content).toMatch(/AGORA|imediatamente/);
+    expect(instruct?.content).toContain("Boa tarde.");
+    const silenceAppends = liveSend.mock.calls.filter(
+      (c) => c[0]?.type === "session.input_audio.append" && c[0]?.audio === PCMU_SILENCE_FRAME,
+    );
+    expect(silenceAppends.length).toBeGreaterThan(0);
+
+    liveSend.mockClear();
+    bridge.onTelnyxMessage({ event: "media", media: { payload: "Q0FMTEU=" } });
+    expect(liveSend).toHaveBeenCalledWith({ type: "session.input_audio.append", audio: "Q0FMTEU=" });
+
+    await bridge.onLiveEvent({ type: "session.usage.updated", usage: { seconds: 2 } });
+    await bridge.onLiveEvent({ type: "session.instructions.appended", client_event_id: "greeting-call-1" });
+    expect(bridge.snapshotAudioPipeline()).toMatchObject({
+      greetingCommandsSent: true,
+      greetingSent: true,
+      outputAudioDeltas: 0,
+      outboundMediaFrames: 0,
+      liveEventTypesAfterGreeting: {
+        "session.instructions.appended": 1,
+        "session.usage.updated": 1,
+      },
+    });
+
+    bridge.markEnded("callee_hangup");
+    spy.mockRestore();
+    const pipeline = errors.find((line) => line.includes("audio pipeline"));
+    expect(pipeline).toMatch(/deltas=0/);
+    expect(pipeline).toMatch(/greeting_commands=true/);
+    expect(pipeline).toMatch(/openai_events_after_greeting=session\.instructions\.appended:1,session\.usage\.updated:1/);
+    expect(pipeline).toMatch(/inbound_media_frames=/);
+  });
+
+  it("does not forward Telnyx ring inbound to GPT-Live before answer", async () => {
+    const liveSend = vi.fn();
+    const telnyxSend = vi.fn();
+    const call = { ...sampleCall(), status: "ringing" as const };
+    const bridge = new GptLiveMediaBridge({
+      call,
+      sendLive: liveSend,
+      sendTelnyx: telnyxSend,
+      telnyx: { dial: vi.fn(), hangup: vi.fn() },
+      postOpeningPauseMs: 0,
+      inputAudioKeepaliveMs: 0,
+    });
+    bridge.attachTelnyx(telnyxSend);
+    bridge.onTelnyxMessage({ event: "start" });
+    await bridge.onLiveEvent({ type: "session.started" });
+    liveSend.mockClear();
+    bridge.onTelnyxMessage({ event: "media", media: { payload: "UklORw==" } });
+    expect(liveSend.mock.calls.some((c) => c[0]?.type === "session.input_audio.append")).toBe(false);
+    bridge.markEnded("callee_hangup");
   });
 });

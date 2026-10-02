@@ -29,8 +29,9 @@ export type PrewarmGptLiveOptions = {
 /**
  * Open the GPT-Live WebSocket and send `session.start` before Telnyx answers.
  * Greeting audio is requested only after `session.started` **and** the PSTN is
- * live (Telnyx `start` + answer, or waitForCallee unlock). Speak-late: do not
- * send `commentary.append` during ring.
+ * live (Telnyx `start` + answer, or waitForCallee unlock). Do not send
+ * `session.instructions.append` during ring. Keep input audio flowing after the
+ * greeting so GPT-Live can emit `session.output_audio.delta`.
  */
 export async function prewarmGptLiveSession(opts: PrewarmGptLiveOptions): Promise<OpenAICallSession> {
   const openai = opts.config.openai;

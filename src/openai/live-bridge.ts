@@ -26,6 +26,8 @@ import {
 } from "../bridge/callee-speech.js";
 import {
   DEFAULT_POST_OPENING_PAUSE_MS,
+  PCMU_FRAME_MS,
+  PCMU_SILENCE_FRAME,
   pcmuSilenceFrames,
   spokenGreetingBeats,
 } from "../bridge/greeting-cadence.js";
@@ -43,13 +45,18 @@ import {
 export type GptLiveAudioPipelineSnapshot = {
   outputAudioDeltas: number;
   outboundMediaFrames: number;
+  inboundMediaFrames: number;
   greetingCommandsSent: boolean;
   sessionReady: boolean;
   streamStarted: boolean;
   callAnswered: boolean;
   outputReady: boolean;
   greetingSent: boolean;
+  liveEventTypesAfterGreeting: Record<string, number>;
 };
+
+/** OpenAI: keep `session.input_audio.append` flowing (including silence) after greeting instructions so the session timeline can inject context and emit `session.output_audio.delta`. */
+export const GPT_LIVE_GREETING_INPUT_BURST_MS = 200;
 
 export type GptLiveMediaBridgeOptions = {
   call: CallRecord;
@@ -69,16 +76,22 @@ export type GptLiveMediaBridgeOptions = {
   clockMs?: () => number;
   /** Silence after the time-of-day opening. 0 skips the listen pause (tests). */
   postOpeningPauseMs?: number;
+  /**
+   * Interval for μ-law silence into GPT-Live after greeting commands.
+   * `0` sends the initial burst only (tests). Default: one 20ms frame.
+   */
+  inputAudioKeepaliveMs?: number;
 };
 
 /**
  * Telnyx ↔ GPT-Live (`gpt-live-1`) speech-to-speech bridge.
- * OpenAI: wait for `session.started` before application commands. Twilio GPT-Live
- * sample: wait for the telephony stream, then `instructions.append` +
- * `commentary.append` whose content is the spoken line. Telnyx `start` fires at
- * **dial** (ring), unlike Twilio `streamSid` (answer) — so the PSTN-live gate is
- * `session.started` + media `start` + `call.answered` (or waitForCallee unlock).
- * Transcript is scripted and is not proof of `session.output_audio.delta`.
+ * OpenAI: wait for `session.started` before application commands. Greeting is
+ * `session.instructions.append` (begin immediately) after the callee can hear
+ * (`start` + `call.answered`, or waitForCallee unlock). Telnyx `start` fires at
+ * dial/ring. Keep `session.input_audio.append` running, including silence —
+ * holding inbound after the greeting stalls the Live session timeline and
+ * yields `session.output_audio.delta` count 0 with no error. Transcript is
+ * scripted and is not proof of audio.
  */
 export class GptLiveMediaBridge {
   readonly call: CallRecord;
@@ -129,7 +142,9 @@ export class GptLiveMediaBridge {
   private closed = false;
   private inboundMediaFrames = 0;
   private inboundBeforeReady: string[] = [];
-  private inboundHeld: string[] = [];
+  private readonly liveEventTypeCounts = new Map<string, number>();
+  private inputKeepaliveTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly inputAudioKeepaliveMs: number;
   private waitForCalleeStallLogged = false;
   private waitForCalleeNeverUnlockedLogged = false;
   private readonly pcmuVad: PcmuVad;
@@ -169,6 +184,7 @@ export class GptLiveMediaBridge {
     this.clockMs = opts.clockMs ?? Date.now;
     this.pcmuVad = createPcmuVad();
     this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
+    this.inputAudioKeepaliveMs = opts.inputAudioKeepaliveMs ?? PCMU_FRAME_MS;
     this.pendingGreetingIntro = spokenGreetingBeats(this.call.greeting).intro;
   }
 
@@ -268,6 +284,7 @@ export class GptLiveMediaBridge {
     console.info(
       `[gpt-live-bridge ${this.call.id}] greeting commands sent streamStarted=${this.streamStarted} callAnswered=${this.callAnswered} outputReady=${this.outputReady} waitForCallee=${this.call.waitForCallee === true}`,
     );
+    this.startGreetingInputKeepalive();
   }
 
   private requestGreetingIntroAudio(): void {
@@ -324,13 +341,9 @@ export class GptLiveMediaBridge {
         const payload = media?.payload;
         if (typeof payload === "string" && payload.length > 0) {
           this.inboundMediaFrames += 1;
-          if (this.sessionReady) {
-            if (this.isHoldingInbound()) {
-              this.holdInbound(payload);
-            } else {
-              this.sendLive({ type: "session.input_audio.append", audio: payload });
-            }
-          } else {
+          if (this.shouldForwardInboundToLive()) {
+            this.sendLive({ type: "session.input_audio.append", audio: payload });
+          } else if (!this.sessionReady) {
             this.inboundBeforeReady.push(payload);
             if (this.inboundBeforeReady.length > 150) this.inboundBeforeReady.shift();
           }
@@ -362,6 +375,7 @@ export class GptLiveMediaBridge {
 
   async onLiveEvent(event: JsonObject): Promise<void> {
     const type = String(event.type ?? "");
+    this.noteLiveEventType(type);
     switch (type) {
       case "session.started":
         this.logSessionStarted(event);
@@ -430,6 +444,7 @@ export class GptLiveMediaBridge {
 
   markEnded(reason: string): void {
     if (this.closed) {
+      this.stopGreetingInputKeepalive();
       this.flushUserTranscript();
       this.flushAssistantTranscript();
       this.logWaitForCalleeNeverUnlocked("hangup");
@@ -439,6 +454,7 @@ export class GptLiveMediaBridge {
     }
     this.closed = true;
     this.greetingGeneration += 1;
+    this.stopGreetingInputKeepalive();
     this.flushUserTranscript();
     this.flushAssistantTranscript();
     this.logWaitForCalleeNeverUnlocked("hangup");
@@ -469,12 +485,16 @@ export class GptLiveMediaBridge {
     return {
       outputAudioDeltas: this.outputAudioDeltas,
       outboundMediaFrames: this.outboundMediaFrames,
+      inboundMediaFrames: this.inboundMediaFrames,
       greetingCommandsSent: this.greetingRequested,
       sessionReady: this.sessionReady,
       streamStarted: this.streamStarted,
       callAnswered: this.callAnswered,
       outputReady: this.outputReady,
       greetingSent: this.greetingSent,
+      liveEventTypesAfterGreeting: Object.fromEntries(
+        [...this.liveEventTypeCounts.entries()].sort(([a], [b]) => a.localeCompare(b)),
+      ),
     };
   }
 
@@ -490,9 +510,7 @@ export class GptLiveMediaBridge {
     const waiters = this.readyWaiters.splice(0);
     for (const waiter of waiters) waiter.resolve();
     if (this.inboundBeforeReady.length > 0) {
-      if (this.isHoldingInbound()) {
-        for (const audio of this.inboundBeforeReady) this.holdInbound(audio);
-      } else {
+      if (this.shouldForwardInboundToLive()) {
         for (const audio of this.inboundBeforeReady) {
           this.sendLive({ type: "session.input_audio.append", audio });
         }
@@ -591,7 +609,9 @@ export class GptLiveMediaBridge {
       ` streamStarted=${snap.streamStarted}` +
       ` callAnswered=${snap.callAnswered}` +
       ` outputReady=${snap.outputReady}` +
-      ` greetingSent=${snap.greetingSent}`;
+      ` greetingSent=${snap.greetingSent}` +
+      ` inbound_media_frames=${this.inboundMediaFrames}` +
+      ` openai_events_after_greeting=${this.liveEventTypeCountsLabel()}`;
     if (snap.greetingSent && snap.outboundMediaFrames === 0) {
       console.error(`${line}; PSTN silent (transcript is not proof of audio)`);
       return;
@@ -599,21 +619,46 @@ export class GptLiveMediaBridge {
     console.info(line);
   }
 
-  private isHoldingInbound(): boolean {
-    return this.greetingSent && !this.greetingDone && this.telnyxAttached;
+  private shouldForwardInboundToLive(): boolean {
+    if (!this.sessionReady) return false;
+    if (this.call.waitForCallee === true) return true;
+    return this.isCalleeOnTheLine();
   }
 
-  private holdInbound(payload: string): void {
-    this.inboundHeld.push(payload);
-    if (this.inboundHeld.length > 150) this.inboundHeld.shift();
+  private noteLiveEventType(type: string): void {
+    if (!this.greetingRequested || !type) return;
+    this.liveEventTypeCounts.set(type, (this.liveEventTypeCounts.get(type) ?? 0) + 1);
   }
 
-  private flushHeldInbound(): void {
-    if (this.inboundHeld.length === 0) return;
-    for (const audio of this.inboundHeld) {
-      this.sendLive({ type: "session.input_audio.append", audio });
+  private liveEventTypeCountsLabel(): string {
+    if (this.liveEventTypeCounts.size === 0) return "none";
+    return [...this.liveEventTypeCounts.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([type, n]) => `${type}:${n}`)
+      .join(",");
+  }
+
+  private startGreetingInputKeepalive(): void {
+    if (this.inputKeepaliveTimer !== undefined) return;
+    for (const chunk of pcmuSilenceFrames(GPT_LIVE_GREETING_INPUT_BURST_MS)) {
+      this.sendLive({ type: "session.input_audio.append", audio: chunk });
     }
-    this.inboundHeld = [];
+    if (this.inputAudioKeepaliveMs <= 0) return;
+    const timer = setInterval(() => {
+      if (this.closed || this.hangingUp || this.greetingDone) {
+        this.stopGreetingInputKeepalive();
+        return;
+      }
+      this.sendLive({ type: "session.input_audio.append", audio: PCMU_SILENCE_FRAME });
+    }, this.inputAudioKeepaliveMs);
+    timer.unref();
+    this.inputKeepaliveTimer = timer;
+  }
+
+  private stopGreetingInputKeepalive(): void {
+    if (this.inputKeepaliveTimer === undefined) return;
+    clearInterval(this.inputKeepaliveTimer);
+    this.inputKeepaliveTimer = undefined;
   }
 
   private onAudioDelta(event: JsonObject): void {
@@ -693,6 +738,7 @@ export class GptLiveMediaBridge {
     this.greetingPlaying = false;
     this.greetingDone = true;
     this.turnAudio.done = true;
+    this.stopGreetingInputKeepalive();
     this.sendLive(
       gptLiveConversationUnlockedAppend({
         callId: this.call.id,
@@ -706,7 +752,6 @@ export class GptLiveMediaBridge {
         greeting: this.call.greeting,
       }) as unknown as JsonObject,
     );
-    this.flushHeldInbound();
     if (this.pendingReplyAfterGreeting) {
       this.pendingReplyAfterGreeting = false;
       this.requestCalleeReply();
