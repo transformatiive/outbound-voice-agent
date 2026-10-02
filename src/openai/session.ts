@@ -175,6 +175,8 @@ export function openaiSessionUpdatePayload(input: {
   includeIdleTimeout?: boolean;
   botRole?: string;
   calleeRole?: string;
+  persona?: string;
+  now?: Date;
 }): OpenAISessionUpdate {
   const waitForCallee = input.waitForCallee === true;
   const createResponse = input.createResponse ?? false;
@@ -189,12 +191,15 @@ export function openaiSessionUpdatePayload(input: {
         language: input.language,
         greeting: input.greeting,
         objective: input.objective,
+        voice: input.voice,
         ...(input.extraInstructions !== undefined ? { extraInstructions: input.extraInstructions } : {}),
         ...(waitForCallee ? { waitForCallee: true } : {}),
         ...(input.timezone ? { timezone: input.timezone } : {}),
         ...(input.botRole ? { botRole: input.botRole } : {}),
         ...(input.calleeRole ? { calleeRole: input.calleeRole } : {}),
         ...(input.ivr ? { ivr: true } : {}),
+        ...(input.persona ? { persona: input.persona } : {}),
+        ...(input.now ? { now: input.now } : {}),
       }),
       audio: {
         input: {

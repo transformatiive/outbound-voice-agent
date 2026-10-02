@@ -6,6 +6,8 @@ import {
   looksLikeInstructionDump,
   looksLikePromptScript,
   timeOfDayGreeting,
+  PT_TOD_AFTERNOON_UNTIL_HOUR,
+  TOD_MORNING_UNTIL_HOUR,
 } from "../src/greeting.js";
 
 /** 09:00 in Europe/Lisbon (WEST, UTC+1 on 2026-09-04). */
@@ -23,7 +25,9 @@ describe("timeOfDayGreeting", () => {
     expect(timeOfDayGreeting("pt-PT", undefined, LISBON_AFTERNOON)).toBe("Boa tarde");
   });
 
-  it("returns Bom dia / Boa tarde / Boa noite for pt-PT in Lisbon", () => {
+  it("uses Lisbon hour cutoffs: Bom dia before 12, Boa tarde until 20, then Boa noite", () => {
+    expect(TOD_MORNING_UNTIL_HOUR).toBe(12);
+    expect(PT_TOD_AFTERNOON_UNTIL_HOUR).toBe(20);
     expect(timeOfDayGreeting("pt-PT", "Europe/Lisbon", LISBON_MORNING)).toBe("Bom dia");
     expect(timeOfDayGreeting("pt-PT", "Europe/Lisbon", LISBON_AFTERNOON)).toBe("Boa tarde");
     expect(timeOfDayGreeting("pt-PT", "Europe/Lisbon", LISBON_EVENING)).toBe("Boa noite");

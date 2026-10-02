@@ -143,6 +143,8 @@ export function sessionUpdatePayload(input: {
   outputSpeed?: number;
   botRole?: string;
   calleeRole?: string;
+  persona?: string;
+  now?: Date;
 }): GrokSessionUpdate {
   const waitForCallee = input.waitForCallee === true;
   const createResponse = input.createResponse ?? !waitForCallee;
@@ -156,6 +158,7 @@ export function sessionUpdatePayload(input: {
         language: input.language,
         greeting: input.greeting,
         objective: input.objective,
+        voice: input.voice,
         ...(input.extraInstructions !== undefined ? { extraInstructions: input.extraInstructions } : {}),
         ...(input.waitForCallee ? { waitForCallee: true } : {}),
         ...(input.ivr ? { ivr: true } : {}),
@@ -163,6 +166,8 @@ export function sessionUpdatePayload(input: {
         ...(input.timeGreeting ? { timeGreeting: input.timeGreeting } : {}),
         ...(input.botRole ? { botRole: input.botRole } : {}),
         ...(input.calleeRole ? { calleeRole: input.calleeRole } : {}),
+        ...(input.persona ? { persona: input.persona } : {}),
+        ...(input.now ? { now: input.now } : {}),
       }),
       turn_detection: grokTurnDetection(input.turnDetection ?? DEFAULT_TURN_DETECTION, {
         createResponse,

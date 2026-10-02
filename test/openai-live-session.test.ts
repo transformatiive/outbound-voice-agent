@@ -57,6 +57,49 @@ describe("GPT-Live session", () => {
     expect(payload.session.instructions).toMatch(/simulação/);
     expect(payload.session.instructions).toMatch(/isto é um teste/);
     expect(payload.session.delegation.responses.instructions).toMatch(/simulação/);
+    expect(payload.session.instructions).toMatch(/muito obrigada/i);
+    expect(payload.session.delegation.responses.instructions).toMatch(/muito obrigada/i);
+  });
+
+  it("injects the shared Lisbon thank-you + time-of-day close into live and backend prompts", () => {
+    const afternoon = new Date("2026-09-04T12:00:00.000Z");
+    const payload = gptLiveSessionStartPayload({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      objective: "Reservar mesa na Capricciosa.",
+      timezone: "Europe/Lisbon",
+      now: afternoon,
+    });
+    expect(payload.session.instructions).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(payload.session.instructions).toMatch(/Europe\/Lisbon/);
+    expect(payload.session.instructions).not.toMatch(/obrigado\(a\)/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(payload.session.delegation.responses.instructions).toMatch(/Europe\/Lisbon/);
+
+    const masculine = buildGptLiveInstructions({
+      language: "pt-PT",
+      greeting: "Boa noite. Sou o secretário da Alfaseguros.",
+      objective: "Confirmar a marcação.",
+      now: new Date("2026-09-04T20:00:00.000Z"),
+    });
+    expect(masculine).toMatch(/Muito obrigado\. Boa noite\./);
+    expect(masculine).not.toMatch(/muito obrigada/i);
+  });
+
+  it("injects clock-time booking and gradual briefing into live and backend prompts", () => {
+    const payload = gptLiveSessionStartPayload({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      objective: "Marcar troca de pneus na Norauto.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(payload.session.instructions).toMatch(/hora do almoço/);
+    expect(payload.session.instructions).toMatch(/14:30|14h30/);
+    expect(payload.session.instructions).toMatch(/aos poucos/i);
+    expect(payload.session.instructions).toMatch(/matrícula/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/hora do almoço/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/aos poucos/i);
   });
 
   it("writes the live prompt in European Portuguese and never defaults to bossa/tempo", () => {

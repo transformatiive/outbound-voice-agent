@@ -1,3 +1,4 @@
+import { defaultSharedCallRules } from "./closing.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "./greeting.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
 
@@ -56,7 +57,7 @@ function stripDiacritics(value: string): string {
 
 /** Shared by Grok and OpenAI session tools so every provider inherits the no-recap close. */
 export const END_CALL_TOOL_DESCRIPTION =
-  "Hang up only after you have fully spoken a short warm thank-you. Do not recap confirmed details (time, party size, name). Never cut a sentence short. Use when the objective is complete, declined, or impossible.";
+  "Hang up only after you have fully spoken a short warm thank-you and time-of-day farewell. Do not recap confirmed details (time, party size, name). Never cut a sentence short. Use when the objective is complete, declined, or impossible.";
 
 /** Hard ban: never verbalize simulation / test / ROLEPLAY meta. All providers. */
 export function spokenMetaBan(language: Language): string {
@@ -85,6 +86,8 @@ export function buildSessionInstructions(input: {
   now?: Date;
   botRole?: string;
   calleeRole?: string;
+  persona?: string;
+  voice?: string;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
@@ -109,7 +112,15 @@ ${input.greeting}
 
 ${localTimeSection(input.language, timezone, timeGreeting)}
 
-${closingSection(input.language)}
+${defaultSharedCallRules({
+  language: input.language,
+  greeting: input.greeting,
+  timezone,
+  timeGreeting,
+  ...(input.now !== undefined ? { now: input.now } : {}),
+  ...(input.persona !== undefined ? { persona: input.persona } : {}),
+  ...(input.voice !== undefined ? { voice: input.voice } : {}),
+})}
 
 ${endCallHeading(input.language)}
 
@@ -207,13 +218,13 @@ Falas só o que uma pessoa diria ao telefone. NUNCA leias listas numeradas (1) 2
 ${spokenMetaBan("pt-PT")}
 
 # Perguntas (és quem liga — nunca a casa)
-Fazes só perguntas de secretária que MARCA: horário, confirmar o nome da reserva, uma preferência que ainda falte no objetivo. NUNCA perguntes «para quantas pessoas?», o nome ou o telefone como se fosses o restaurante — sobretudo depois de o interlocutor confirmar («tá marcado», «está marcado», «já está», «reserva feita»). Se o número de pessoas, o nome ou o telefone já estão no objetivo, DIZ-LOS ao marcar («mesa para 2, nome Nuno Barreto») — não os peças à casa. Depois de a casa confirmar: agradece calorosamente (sem recapitular hora, pessoas, nem nome) e chama end_call. Não faças mais perguntas de recepção.
+Fazes só perguntas de secretária que MARCA: horário, confirmar o nome da reserva, uma preferência que ainda falte no objetivo. NUNCA perguntes «para quantas pessoas?», o nome ou o telefone como se fosses o restaurante — sobretudo depois de o interlocutor confirmar («tá marcado», «está marcado», «já está», «reserva feita»). Se o número de pessoas, o nome ou o telefone já estão no objetivo, DIZ-LOS quando forem precisos para avançar («mesa para 2, nome Nuno Barreto») — não no primeiro turno, e não os peças à casa. Depois de a casa confirmar uma hora de relógio: agradece calorosamente (sem recapitular hora, pessoas, nem nome) e chama end_call. Não faças mais perguntas de recepção.
 
 # Factos
 NUNCA inventes factos que o interlocutor não afirmou: horário de abertura, disponibilidade, preços, ementas, políticas, número de pessoas, datas, nomes, ou qualquer facto do estabelecimento. PROIBIDO inventar «o restaurante só abre às 19h», «só abre às X», ou qualquer hora de abertura que ele não tenha dito. Se propuser uma hora, aceita ou negoceia a partir DO QUE ELE DISSE — uma pergunta curta só se estiver ambíguo. Se não souberes, faz UMA pergunta curta de secretária (hora, nome da reserva, preferência em falta) — nunca uma pergunta de recepção. Se o que ouviste for curto, confuso ou «estou»/«alô», trata como a pessoa ao telefone e continua.
 
 # Estado da marcação
-NUNCA inventes nem desmintas o estado da reserva ou marcação que o interlocutor já afirmou. Se disser «já estava marcado», «está confirmado», «já está», «tá marcado», ou confirmar uma hora, aceita e segue a partir daí — agradece (sem recapitular os detalhes) e faz só o que ainda faltar. Se já não faltar nada: agradece e chama end_call. Só esclarece com UMA pergunta curta se estiver mesmo ambíguo. Nunca contradigas o último turno do interlocutor com factos inventados (por exemplo dizer que ainda não há reserva quando ele acabou de dizer que já estava marcado).`;
+NUNCA inventes nem desmintas o estado da reserva ou marcação que o interlocutor já afirmou. Se disser «já estava marcado», «está confirmado», «já está», «tá marcado», ou confirmar uma hora de relógio, aceita e segue a partir daí — agradece (sem recapitular os detalhes) e faz só o que ainda faltar. Uma janela vaga («hora do almoço», «de manhã») ainda não é hora de relógio. Se já não faltar nada e a hora de relógio estiver confirmada: agradece e chama end_call. Só esclarece com UMA pergunta curta se estiver mesmo ambíguo. Nunca contradigas o último turno do interlocutor com factos inventados (por exemplo dizer que ainda não há reserva quando ele acabou de dizer que já estava marcado).`;
 }
 
 function roleEn(botRole: string, calleeRole: string): string {
@@ -242,13 +253,13 @@ Say only what a person would say on the phone. NEVER read numbered lists (1) 2) 
 ${spokenMetaBan("en-GB")}
 
 # Questions (you are the caller — never the house)
-Ask only what a booking secretary would ask: time, confirm the reservation name, a preference still missing from the objective. NEVER ask headcount, name, or phone as if you were the venue — especially after they confirm (“it’s booked”, “all set”, “reservation made”). If headcount, name, or phone are already in the objective, STATE them when booking (“table for 2, name Nuno Barreto”) instead of asking the restaurant to tell you. After the venue confirms: thank them warmly (do not recap time, party size, or name) and call end_call. Do not ask reception questions after that.
+Ask only what a booking secretary would ask: time, confirm the reservation name, a preference still missing from the objective. NEVER ask headcount, name, or phone as if you were the venue — especially after they confirm (“it’s booked”, “all set”, “reservation made”). If headcount, name, or phone are already in the objective, STATE them when needed to progress (“table for 2, name Nuno Barreto”) — not in the opening turn, and not by asking the restaurant to tell you. After the venue confirms a clock time: thank them warmly (do not recap time, party size, or name) and call end_call. Do not ask reception questions after that.
 
 # Facts
 NEVER invent facts the interlocutor did not state: opening hours, availability, prices, menus, policies, headcount, dates, names, or any other venue fact. FORBIDDEN to invent “the restaurant only opens at 7pm”, “only opens at X”, or any opening hour they did not say. If they propose a time, accept or negotiate from THEIR statement — one short clarifying question only if it is ambiguous. If you do not know, ask ONE short secretary question (time, reservation name, missing preference) — never a reception question. If what you heard is short, garbled, or just “hello”/“yeah”, treat it as the person on the line and continue.
 
 # Booking state
-NEVER invent or deny booking state they already stated. If they say it was already booked, already confirmed, or they confirm a time, accept that and proceed from there — thank them (no recap of details) and only do what is still missing. If nothing is missing: thank them and call end_call. Ask ONE short clarifying question only if it is genuinely ambiguous. Never contradict their last turn with invented facts (for example claiming there is no reservation after they just said it was already marked).`;
+NEVER invent or deny booking state they already stated. If they say it was already booked, already confirmed, or they confirm a clock time, accept that and proceed from there — thank them (no recap of details) and only do what is still missing. A vague window (“lunchtime”, “in the morning”) is not a clock time. If nothing is missing and a clock time is confirmed: thank them and call end_call. Ask ONE short clarifying question only if it is genuinely ambiguous. Never contradict their last turn with invented facts (for example claiming there is no reservation after they just said it was already marked).`;
 }
 
 function localTimeSection(language: Language, timezone: string, timeGreeting: string): string {
@@ -299,39 +310,15 @@ function greetingHeading(language: Language, waitForCallee: boolean): string {
   }
 }
 
-function closingSection(language: Language): string {
-  switch (language) {
-    case "pt-PT":
-      return `# Encerramento (prioridade máxima)
-Quando a marcação ou o objetivo estiver concluído (a casa confirmou, recusou, ou é claramente impossível):
-- Agradece só, de forma calorosa e natural em pt-PT, e chama \`end_call\`.
-- NÃO recapitules nem resumes os detalhes já confirmados (hora, pessoas, nome, telefone, data).
-- PROIBIDO: «então fica marcado para…», «fica para as X, mesa para N, nome…», ou qualquer recap.
-- Uma frase de agradecimento chega. Não alongues a despedida.`;
-    case "en-GB":
-    case "en-US":
-      return `# Closing (highest priority)
-When the booking or objective is complete (they confirmed, declined, or it is clearly impossible):
-- Thank them warmly and naturally, then call \`end_call\`.
-- Do NOT restate or summarize confirmed details (time, party size, name, phone, date).
-- FORBIDDEN: “so that’s booked for…”, recapping the slot, or any summary of what was just agreed.
-- One short thank-you is enough. Do not stretch the goodbye.`;
-    default: {
-      const _never: never = language;
-      throw new Error(`unsupported language: ${_never}`);
-    }
-  }
-}
-
 function endCallHeading(language: Language): string {
   switch (language) {
     case "pt-PT":
       return `# end_call
-Diz só o agradecimento curto até ao fim — a frase completa, em voz alta. Sem resumo dos detalhes. Só depois chama a ferramenta \`end_call\`. NUNCA cortes a despedida a meio. Não mantenhas a pessoa em linha depois de o objetivo estar feito.`;
+Diz o agradecimento e a despedida de hora até ao fim — a frase completa, em voz alta. Sem resumo dos detalhes. Só depois chama a ferramenta \`end_call\`. NUNCA cortes a despedida a meio. Não mantenhas a pessoa em linha depois de o objetivo estar feito.`;
     case "en-GB":
     case "en-US":
       return `# end_call
-Speak the full short thank-you out loud, to the end of the sentence — no recap. Only then call the \`end_call\` tool. NEVER cut the farewell mid-sentence. Do not keep the callee on the line after the objective is done.`;
+Speak the full short thank-you and time-of-day farewell out loud, to the end of the sentence — no recap. Only then call the \`end_call\` tool. NEVER cut the farewell mid-sentence. Do not keep the callee on the line after the objective is done.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

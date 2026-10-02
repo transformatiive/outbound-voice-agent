@@ -4,6 +4,13 @@ export const DEFAULT_TIMEZONE = "Europe/Lisbon";
 export const MAX_SPOKEN_ASK_CHARS = 140;
 export const MAX_IDENTITY_CHARS = 90;
 
+/** Lisbon local hour: [0, 12) Bom dia / Good morning. Shared with call closing. */
+export const TOD_MORNING_UNTIL_HOUR = 12;
+/** pt-PT Lisbon local hour: [12, 20) Boa tarde. */
+export const PT_TOD_AFTERNOON_UNTIL_HOUR = 20;
+/** en-GB / en-US local hour: [12, 17) Good afternoon. */
+export const EN_TOD_AFTERNOON_UNTIL_HOUR = 17;
+
 const LEADING_HELLO = /^(olá|ola|hello)\s*[,.]?\s*/i;
 const LEADING_TIME =
   /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\s*[,.]?\s*/i;
@@ -48,13 +55,13 @@ export function timeOfDayGreeting(
   const hour = hourInTimeZone(now, zone);
   switch (language) {
     case "pt-PT":
-      if (hour < 12) return "Bom dia";
-      if (hour < 20) return "Boa tarde";
+      if (hour < TOD_MORNING_UNTIL_HOUR) return "Bom dia";
+      if (hour < PT_TOD_AFTERNOON_UNTIL_HOUR) return "Boa tarde";
       return "Boa noite";
     case "en-GB":
     case "en-US":
-      if (hour < 12) return "Good morning";
-      if (hour < 17) return "Good afternoon";
+      if (hour < TOD_MORNING_UNTIL_HOUR) return "Good morning";
+      if (hour < EN_TOD_AFTERNOON_UNTIL_HOUR) return "Good afternoon";
       return "Good evening";
     default: {
       const _never: never = language;

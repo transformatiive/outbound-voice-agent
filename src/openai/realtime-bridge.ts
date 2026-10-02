@@ -209,6 +209,7 @@ export class OpenAIMediaBridge {
         ...(this.call.timezone ? { timezone: this.call.timezone } : {}),
         ...(this.call.botRole ? { botRole: this.call.botRole } : {}),
         ...(this.call.calleeRole ? { calleeRole: this.call.calleeRole } : {}),
+        ...(this.call.persona ? { persona: this.call.persona } : {}),
         turnDetection: this.turnDetection,
         createResponse: autoRespond,
         includeIdleTimeout: autoRespond,
