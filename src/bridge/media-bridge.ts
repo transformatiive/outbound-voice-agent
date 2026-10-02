@@ -248,6 +248,7 @@ export class MediaBridge {
         ...(this.call.timezone ? { timezone: this.call.timezone } : {}),
         ...(this.call.botRole ? { botRole: this.call.botRole } : {}),
         ...(this.call.calleeRole ? { calleeRole: this.call.calleeRole } : {}),
+        ...(this.call.persona ? { persona: this.call.persona } : {}),
         ...(this.call.ivr ? { ivr: true } : {}),
         turnDetection: this.turnDetection,
         createResponse: autoRespond,

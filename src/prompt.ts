@@ -1,3 +1,4 @@
+import { defaultClosingRule } from "./closing.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "./greeting.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "./roles.js";
 
@@ -56,7 +57,7 @@ function stripDiacritics(value: string): string {
 
 /** Shared by Grok and OpenAI session tools so every provider inherits the no-recap close. */
 export const END_CALL_TOOL_DESCRIPTION =
-  "Hang up only after you have fully spoken a short warm thank-you. Do not recap confirmed details (time, party size, name). Never cut a sentence short. Use when the objective is complete, declined, or impossible.";
+  "Hang up only after you have fully spoken a short warm thank-you and time-of-day farewell. Do not recap confirmed details (time, party size, name). Never cut a sentence short. Use when the objective is complete, declined, or impossible.";
 
 /** Hard ban: never verbalize simulation / test / ROLEPLAY meta. All providers. */
 export function spokenMetaBan(language: Language): string {
@@ -85,6 +86,8 @@ export function buildSessionInstructions(input: {
   now?: Date;
   botRole?: string;
   calleeRole?: string;
+  persona?: string;
+  voice?: string;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
@@ -109,7 +112,15 @@ ${input.greeting}
 
 ${localTimeSection(input.language, timezone, timeGreeting)}
 
-${closingSection(input.language)}
+${defaultClosingRule({
+  language: input.language,
+  greeting: input.greeting,
+  timezone,
+  timeGreeting,
+  ...(input.now !== undefined ? { now: input.now } : {}),
+  ...(input.persona !== undefined ? { persona: input.persona } : {}),
+  ...(input.voice !== undefined ? { voice: input.voice } : {}),
+})}
 
 ${endCallHeading(input.language)}
 
@@ -299,39 +310,15 @@ function greetingHeading(language: Language, waitForCallee: boolean): string {
   }
 }
 
-function closingSection(language: Language): string {
-  switch (language) {
-    case "pt-PT":
-      return `# Encerramento (prioridade máxima)
-Quando a marcação ou o objetivo estiver concluído (a casa confirmou, recusou, ou é claramente impossível):
-- Agradece só, de forma calorosa e natural em pt-PT, e chama \`end_call\`.
-- NÃO recapitules nem resumes os detalhes já confirmados (hora, pessoas, nome, telefone, data).
-- PROIBIDO: «então fica marcado para…», «fica para as X, mesa para N, nome…», ou qualquer recap.
-- Uma frase de agradecimento chega. Não alongues a despedida.`;
-    case "en-GB":
-    case "en-US":
-      return `# Closing (highest priority)
-When the booking or objective is complete (they confirmed, declined, or it is clearly impossible):
-- Thank them warmly and naturally, then call \`end_call\`.
-- Do NOT restate or summarize confirmed details (time, party size, name, phone, date).
-- FORBIDDEN: “so that’s booked for…”, recapping the slot, or any summary of what was just agreed.
-- One short thank-you is enough. Do not stretch the goodbye.`;
-    default: {
-      const _never: never = language;
-      throw new Error(`unsupported language: ${_never}`);
-    }
-  }
-}
-
 function endCallHeading(language: Language): string {
   switch (language) {
     case "pt-PT":
       return `# end_call
-Diz só o agradecimento curto até ao fim — a frase completa, em voz alta. Sem resumo dos detalhes. Só depois chama a ferramenta \`end_call\`. NUNCA cortes a despedida a meio. Não mantenhas a pessoa em linha depois de o objetivo estar feito.`;
+Diz o agradecimento e a despedida de hora até ao fim — a frase completa, em voz alta. Sem resumo dos detalhes. Só depois chama a ferramenta \`end_call\`. NUNCA cortes a despedida a meio. Não mantenhas a pessoa em linha depois de o objetivo estar feito.`;
     case "en-GB":
     case "en-US":
       return `# end_call
-Speak the full short thank-you out loud, to the end of the sentence — no recap. Only then call the \`end_call\` tool. NEVER cut the farewell mid-sentence. Do not keep the callee on the line after the objective is done.`;
+Speak the full short thank-you and time-of-day farewell out loud, to the end of the sentence — no recap. Only then call the \`end_call\` tool. NEVER cut the farewell mid-sentence. Do not keep the callee on the line after the objective is done.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

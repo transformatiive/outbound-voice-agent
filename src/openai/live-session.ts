@@ -1,6 +1,7 @@
 import { END_CALL_TOOL_DESCRIPTION, spokenMetaBan, type Language } from "../prompt.js";
 import { SEND_DTMF_TOOL } from "../dtmf.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
+import { defaultClosingRule, spokenCallClosing } from "../closing.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "../greeting.js";
 import {
   DEFAULT_GPT_LIVE_DELEGATE_MODEL,
@@ -261,10 +262,13 @@ export function gptLiveSessionStartPayload(input: {
   calleeRole?: string;
   ivr?: boolean;
   now?: Date;
+  persona?: string;
 }): GptLiveSessionStart {
   const model = input.model?.trim() || DEFAULT_GPT_LIVE_MODEL;
   const voice = input.voice?.trim() || DEFAULT_GPT_LIVE_VOICE;
   const delegateModel = input.delegateModel?.trim() || DEFAULT_GPT_LIVE_DELEGATE_MODEL;
+  const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
+  const timeGreeting = timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
   return {
     type: "session.start",
     event_id: "event_start",
@@ -274,11 +278,14 @@ export function gptLiveSessionStartPayload(input: {
         language: input.language,
         greeting: input.greeting,
         objective: input.objective,
-        ...(input.timezone ? { timezone: input.timezone } : {}),
+        voice,
+        timezone,
+        timeGreeting,
         ...(input.botRole ? { botRole: input.botRole } : {}),
         ...(input.calleeRole ? { calleeRole: input.calleeRole } : {}),
         ...(input.ivr ? { ivr: true } : {}),
         ...(input.now ? { now: input.now } : {}),
+        ...(input.persona ? { persona: input.persona } : {}),
       }),
       audio: {
         format: { type: "audio/pcmu", rate: 8000 },
@@ -292,11 +299,15 @@ export function gptLiveSessionStartPayload(input: {
             language: input.language,
             greeting: input.greeting,
             objective: input.objective,
+            voice,
+            timezone,
+            timeGreeting,
             ...(input.extraInstructions !== undefined
               ? { extraInstructions: input.extraInstructions }
               : {}),
-            ...(input.timezone ? { timezone: input.timezone } : {}),
             ...(input.ivr ? { ivr: true } : {}),
+            ...(input.now ? { now: input.now } : {}),
+            ...(input.persona ? { persona: input.persona } : {}),
           }),
           tools: gptLiveBackendTools(),
           tool_choice: "auto",
@@ -343,16 +354,32 @@ export function buildGptLiveInstructions(input: {
   greeting: string;
   objective: string;
   timezone?: string;
+  timeGreeting?: string;
   botRole?: string;
   calleeRole?: string;
   ivr?: boolean;
   now?: Date;
+  persona?: string;
+  voice?: string;
 }): string {
   const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
-  const timeGreeting = timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
+  const timeGreeting =
+    input.timeGreeting?.trim() ||
+    timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
   const botRole = input.botRole?.trim() || DEFAULT_BOT_ROLE;
   const calleeRole = input.calleeRole?.trim() || DEFAULT_CALLEE_ROLE;
   const expressive = gptLiveExpressiveVoiceInstructions(input.language);
+  const closingInput = {
+    language: input.language,
+    greeting: input.greeting,
+    timezone,
+    timeGreeting,
+    ...(input.now !== undefined ? { now: input.now } : {}),
+    ...(input.persona !== undefined ? { persona: input.persona } : {}),
+    ...(input.voice !== undefined ? { voice: input.voice } : {}),
+  };
+  const closing = defaultClosingRule(closingInput);
+  const spoken = spokenCallClosing(closingInput);
   switch (input.language) {
     case "pt-PT":
       return `És a pessoa que LIGOU esta chamada (${botRole}) a pedir uma mesa / marcação. O destinatário é staff do estabelecimento (${calleeRole}). Nunca és o restaurante nem a recepção. Nunca «bem-vindo ao restaurante».
@@ -372,7 +399,11 @@ Backchannel policy: Use moderate backchannels. Acknowledge naturally without com
 
 Interruption policy: Stop speaking when the user interrupts. Listen to what they say.
 
-Nunca inventes horários, ementas, preços ou políticas. Nunca recapitules a reserva. Depois de confirmado: agradece só (sem recap) e pede ao backend para desligar.
+Nunca inventes horários, ementas, preços ou políticas. Nunca recapitules a reserva.
+
+${closing}
+
+Depois de confirmado: diz «${spoken}» e pede ao backend para desligar.
 
 Delegation policy:
 Backend tools:
@@ -408,7 +439,11 @@ Backchannel policy: Use moderate backchannels. Acknowledge naturally without com
 
 Interruption policy: Stop speaking when the user interrupts. Listen to what they say.
 
-Never invent venue facts. Never recap a confirmed booking. After confirmation: thank them only, then ask the backend to hang up.
+Never invent venue facts. Never recap a confirmed booking.
+
+${closing}
+
+After confirmation: say “${spoken}”, then ask the backend to hang up.
 
 Delegation policy:
 Backend tools:
@@ -440,12 +475,30 @@ export function buildGptLiveBackendInstructions(input: {
   objective: string;
   extraInstructions?: string;
   timezone?: string;
+  timeGreeting?: string;
   ivr?: boolean;
+  now?: Date;
+  persona?: string;
+  voice?: string;
 }): string {
   const extra = input.extraInstructions?.trim()
     ? `\n\n# Additional instructions\n${input.extraInstructions.trim()}\n`
     : "";
   const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
+  const timeGreeting =
+    input.timeGreeting?.trim() ||
+    timeOfDayGreeting(input.language, timezone, input.now ?? new Date());
+  const closingInput = {
+    language: input.language,
+    greeting: input.greeting,
+    timezone,
+    timeGreeting,
+    ...(input.now !== undefined ? { now: input.now } : {}),
+    ...(input.persona !== undefined ? { persona: input.persona } : {}),
+    ...(input.voice !== undefined ? { voice: input.voice } : {}),
+  };
+  const closing = defaultClosingRule(closingInput);
+  const spoken = spokenCallClosing(closingInput);
   switch (input.language) {
     case "pt-PT":
       return `És o raciocínio de uma chamada de telefone em português europeu de Portugal (pt-PT, Lisboa). Nunca brasileiro. A voz na linha já está a falar com o destinatário.
@@ -463,7 +516,9 @@ ${timezone}
 - \`${END_CALL_TOOL.name}\`: ${END_CALL_TOOL_DESCRIPTION}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
-Quando o objetivo estiver concluído, recusado ou impossível: a voz agradece só (sem recap de hora/pessoas/nome) e tu chamas end_call. Nunca inventes factos do estabelecimento. Nunca inventes «amanhã» nem outra data — usa a data EXACTA do objetivo. Nunca inverta o papel: quem ligou pede a mesa; quem atendeu é a casa.
+${closing}
+
+Quando o objetivo estiver concluído, recusado ou impossível: a voz diz exactamente «${spoken}» (sem recap de hora/pessoas/nome) e tu chamas end_call. Nunca inventes factos do estabelecimento. Nunca inventes «amanhã» nem outra data — usa a data EXACTA do objetivo. Nunca inverta o papel: quem ligou pede a mesa; quem atendeu é a casa.
 ${spokenMetaBan("pt-PT")}
 ${input.ivr ? "Esta chamada pode ser IVR: usa send_dtmf quando pedirem teclas.\n" : ""}${extra}`.trim();
     case "en-GB":
@@ -483,7 +538,9 @@ ${timezone}
 - \`${END_CALL_TOOL.name}\`: ${END_CALL_TOOL_DESCRIPTION}
 - \`${SEND_DTMF_TOOL.name}\`: ${SEND_DTMF_TOOL.description}
 
-When the objective is complete, declined, or impossible: the voice thanks them only (no recap) and you call end_call. Never invent venue facts. Never invent “tomorrow” or another date — use the exact date from the objective. The bot placed the call; the callee is venue staff.
+${closing}
+
+When the objective is complete, declined, or impossible: the voice says exactly “${spoken}” (no recap) and you call end_call. Never invent venue facts. Never invent “tomorrow” or another date — use the exact date from the objective. The bot placed the call; the callee is venue staff.
 ${spokenMetaBan("en-GB")}
 ${input.ivr ? "This call may be IVR: use send_dtmf when they ask for keys.\n" : ""}${extra}`.trim();
     default: {

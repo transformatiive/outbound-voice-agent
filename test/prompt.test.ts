@@ -405,14 +405,14 @@ describe("prompt / language", () => {
           expect(text).toMatch(/prioridade máxima/);
           expect(text).toMatch(/então fica marcado para/);
           expect(text).toMatch(/hora.*pessoas.*nome|pessoas.*nome.*hora/s);
-          expect(text).toMatch(/agradece/i);
+          expect(text).toMatch(/agradece|muito obrigad/i);
           expect(text).toMatch(/sem recap|NÃO recapitul|não restates|sem resum/i);
           expect(text).toMatch(/calorosa/);
         } else {
           expect(text).toMatch(/Closing \(highest priority/);
           expect(text).toMatch(/Do NOT restate or summarize confirmed details/i);
           expect(text).toMatch(/time, (party size|headcount|people), name/i);
-          expect(text).toMatch(/thank them/i);
+          expect(text).toMatch(/thank them|thank you/i);
           expect(text).toMatch(/so that’s booked for|so that's booked for/);
         }
         if (waitForCallee) {
@@ -425,6 +425,36 @@ describe("prompt / language", () => {
         assertNoSpokenBranding(text);
       }
     }
+  });
+
+  it("bakes muito obrigada/obrigado plus Lisbon time-of-day into default pt-PT closing", () => {
+    const afternoon = new Date("2026-09-04T12:00:00.000Z");
+    const feminine = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      objective: "Reservar mesa na Capricciosa.",
+      timezone: "Europe/Lisbon",
+      now: afternoon,
+    });
+    expect(feminine).toMatch(/muito obrigada/i);
+    expect(feminine).toMatch(/Boa tarde/);
+    expect(feminine).toMatch(/Europe\/Lisbon/);
+    expect(feminine).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(feminine).not.toMatch(/obrigado\(a\)/);
+    assertNoSpokenBranding(feminine);
+
+    const morning = new Date("2026-09-04T08:00:00.000Z");
+    const masculine = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Bom dia. Sou o secretário da Alfaseguros.",
+      objective: "Confirmar a marcação.",
+      timezone: "Europe/Lisbon",
+      now: morning,
+    });
+    expect(masculine).toMatch(/muito obrigado/i);
+    expect(masculine).not.toMatch(/muito obrigada/i);
+    expect(masculine).toMatch(/Muito obrigado\. Bom dia\./);
+    assertNoSpokenBranding(masculine);
   });
 
   it("hardens snappy phone turns: reply now, no planning narration, no brief re-list", () => {
