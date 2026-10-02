@@ -40,6 +40,17 @@ import {
   gptLiveSessionStartPayload,
 } from "./live-session.js";
 
+export type GptLiveAudioPipelineSnapshot = {
+  outputAudioDeltas: number;
+  outboundMediaFrames: number;
+  greetingCommandsSent: boolean;
+  sessionReady: boolean;
+  streamStarted: boolean;
+  callAnswered: boolean;
+  outputReady: boolean;
+  greetingSent: boolean;
+};
+
 export type GptLiveMediaBridgeOptions = {
   call: CallRecord;
   sendLive: (event: JsonObject) => void;
@@ -62,12 +73,12 @@ export type GptLiveMediaBridgeOptions = {
 
 /**
  * Telnyx ↔ GPT-Live (`gpt-live-1`) speech-to-speech bridge.
- * Generate-early / speak-late: greeting audio is requested on `session.started`,
- * buffered while muted, and flushed to Telnyx only after media-stream `start`
- * **and** PSTN answer (`call.answered`). Attach/`start` during ring is not
- * enough — Telnyx connects the stream at dial; outbound PCMU sent then is
- * early media the callee never hears. Intro TTS is requested only after
- * opening PCMU has arrived (transcript.done alone would steal opening audio).
+ * OpenAI: wait for `session.started` before application commands. Twilio GPT-Live
+ * sample: wait for the telephony stream, then `instructions.append` +
+ * `commentary.append` whose content is the spoken line. Telnyx `start` fires at
+ * **dial** (ring), unlike Twilio `streamSid` (answer) — so the PSTN-live gate is
+ * `session.started` + media `start` + `call.answered` (or waitForCallee unlock).
+ * Transcript is scripted and is not proof of `session.output_audio.delta`.
  */
 export class GptLiveMediaBridge {
   readonly call: CallRecord;
@@ -98,6 +109,8 @@ export class GptLiveMediaBridge {
   /** Outbound PCMU may be sent: stream started AND (answered, or waitForCallee inbound path). */
   private outputReady = false;
   private outboundMediaFrames = 0;
+  private outputAudioDeltas = 0;
+  private audioPipelineLogged = false;
   private greetingSent = false;
   private greetingPlaying = false;
   private greetingRequested = false;
@@ -231,6 +244,7 @@ export class GptLiveMediaBridge {
 
   requestGreetingAudio(): void {
     if (this.greetingRequested) return;
+    if (!this.canSendGreetingCommands()) return;
     this.greetingRequested = true;
     this.greetingGeneration += 1;
     this.beginTurnAudio();
@@ -248,12 +262,17 @@ export class GptLiveMediaBridge {
       gptLiveGreetingCommentaryAppend({
         callId: this.call.id,
         language: this.call.language,
+        greeting: text,
       }) as unknown as JsonObject,
+    );
+    console.info(
+      `[gpt-live-bridge ${this.call.id}] greeting commands sent streamStarted=${this.streamStarted} callAnswered=${this.callAnswered} outputReady=${this.outputReady} waitForCallee=${this.call.waitForCallee === true}`,
     );
   }
 
   private requestGreetingIntroAudio(): void {
     if (this.greetingIntroRequested || !this.pendingGreetingIntro) return;
+    if (!this.sessionReady) return;
     this.greetingIntroRequested = true;
     const intro = this.pendingGreetingIntro;
     this.sendLive(
@@ -267,6 +286,7 @@ export class GptLiveMediaBridge {
       gptLiveGreetingCommentaryAppend({
         callId: `${this.call.id}-intro`,
         language: this.call.language,
+        greeting: intro,
       }) as unknown as JsonObject,
     );
   }
@@ -370,11 +390,18 @@ export class GptLiveMediaBridge {
         }
         return;
       }
+      case "session.instructions.appended":
+      case "session.commentary.appended":
+      case "session.thinking.appended":
+        console.info(
+          `[gpt-live-bridge ${this.call.id}] live ack type=${type} client_event_id=${String(event.client_event_id ?? "")}`,
+        );
+        return;
       case "error":
         this.onSessionErrorEvent(event);
         return;
       default:
-        if (type && type !== "session.updated" && type !== "session.closed") {
+        if (type && type !== "session.updated" && type !== "session.closed" && type !== "session.usage.updated") {
           console.info(`[gpt-live-bridge ${this.call.id}] ignored live event type=${type}`);
         }
         return;
@@ -406,6 +433,7 @@ export class GptLiveMediaBridge {
       this.flushUserTranscript();
       this.flushAssistantTranscript();
       this.logWaitForCalleeNeverUnlocked("hangup");
+      this.logAudioPipeline("hangup");
       this.onEnded?.(this.call);
       return;
     }
@@ -414,6 +442,7 @@ export class GptLiveMediaBridge {
     this.flushUserTranscript();
     this.flushAssistantTranscript();
     this.logWaitForCalleeNeverUnlocked("hangup");
+    this.logAudioPipeline("hangup");
     if (
       this.call.status === "completed" ||
       this.call.status === "failed" ||
@@ -433,6 +462,26 @@ export class GptLiveMediaBridge {
     this.flushUserTranscript();
     this.flushAssistantTranscript();
     this.logWaitForCalleeNeverUnlocked("hangup");
+    this.logAudioPipeline("hangup");
+  }
+
+  snapshotAudioPipeline(): GptLiveAudioPipelineSnapshot {
+    return {
+      outputAudioDeltas: this.outputAudioDeltas,
+      outboundMediaFrames: this.outboundMediaFrames,
+      greetingCommandsSent: this.greetingRequested,
+      sessionReady: this.sessionReady,
+      streamStarted: this.streamStarted,
+      callAnswered: this.callAnswered,
+      outputReady: this.outputReady,
+      greetingSent: this.greetingSent,
+    };
+  }
+
+  private canSendGreetingCommands(): boolean {
+    if (!this.sessionReady) return false;
+    if (this.call.waitForCallee === true) return this.greetingSent;
+    return this.outputReady;
   }
 
   private markSessionReady(): void {
@@ -523,9 +572,31 @@ export class GptLiveMediaBridge {
     const session = event.session && typeof event.session === "object" ? (event.session as JsonObject) : undefined;
     const audio = session?.audio && typeof session.audio === "object" ? (session.audio as JsonObject) : undefined;
     const format = audio?.format;
+    const sessionId = typeof session?.id === "string" ? session.id : "";
     console.info(
-      `[gpt-live-bridge ${this.call.id}] session.started audio.format=${JSON.stringify(format ?? null)}`,
+      `[gpt-live-bridge ${this.call.id}] session.started id=${sessionId || "none"} audio.format=${JSON.stringify(format ?? null)}`,
     );
+  }
+
+  private logAudioPipeline(phase: string): void {
+    if (this.audioPipelineLogged) return;
+    this.audioPipelineLogged = true;
+    const snap = this.snapshotAudioPipeline();
+    const line =
+      `[gpt-live-bridge ${this.call.id}] audio pipeline ${phase}` +
+      ` deltas=${snap.outputAudioDeltas}` +
+      ` telnyx_media_frames=${snap.outboundMediaFrames}` +
+      ` greeting_commands=${snap.greetingCommandsSent}` +
+      ` sessionReady=${snap.sessionReady}` +
+      ` streamStarted=${snap.streamStarted}` +
+      ` callAnswered=${snap.callAnswered}` +
+      ` outputReady=${snap.outputReady}` +
+      ` greetingSent=${snap.greetingSent}`;
+    if (snap.greetingSent && snap.outboundMediaFrames === 0) {
+      console.error(`${line}; PSTN silent (transcript is not proof of audio)`);
+      return;
+    }
+    console.info(line);
   }
 
   private isHoldingInbound(): boolean {
@@ -549,6 +620,13 @@ export class GptLiveMediaBridge {
     const delta =
       typeof event.delta === "string" ? event.delta : typeof event.audio === "string" ? event.audio : undefined;
     if (typeof delta !== "string" || delta.length === 0) return;
+    this.outputAudioDeltas += 1;
+    if (this.outputAudioDeltas === 1) {
+      const bytes = Buffer.from(delta, "base64").length;
+      console.info(
+        `[gpt-live-bridge ${this.call.id}] first output_audio.delta bytes=${bytes} greetingRequested=${this.greetingRequested} outputReady=${this.outputReady} greetingSent=${this.greetingSent}`,
+      );
+    }
     const greetingAudio = this.greetingRequested && !this.greetingDone;
     if (greetingAudio) {
       if (this.greetingIntroRequested) {

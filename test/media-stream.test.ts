@@ -735,7 +735,7 @@ describe("media stream websocket", () => {
       const session = start?.session as JsonObject | undefined;
       expect(session?.model).toBe("gpt-live-1");
       expect((session?.audio as JsonObject | undefined)?.format).toEqual({ type: "audio/pcmu", rate: 8000 });
-      expect(fake?.sent.some((m: JsonObject) => m.type === "session.instructions.append")).toBe(true);
+      expect(fake?.sent.some((m: JsonObject) => m.type === "session.instructions.append")).toBe(false);
 
       const telnyxFromLive: JsonObject[] = [];
       const telnyxWs = new WebSocket(
@@ -820,7 +820,7 @@ describe("media stream websocket", () => {
       const call = store.get(created.body.id as string);
       if (!call) throw new Error("call missing");
       await new Promise((r) => setTimeout(r, 40));
-      expect(fake?.sent.some((m: JsonObject) => m.type === "session.instructions.append")).toBe(true);
+      expect(fake?.sent.some((m: JsonObject) => m.type === "session.instructions.append")).toBe(false);
 
       const telnyxFromLive: JsonObject[] = [];
       const telnyxWs = new WebSocket(

@@ -128,18 +128,13 @@ export function gptLiveGreetingSpeakInstructions(language: Language, greeting: s
   }
 }
 
-export function gptLiveGreetingCommentary(language: Language): string {
-  switch (language) {
-    case "pt-PT":
-      return "Começa agora a conversa, seguindo as instruções. Diz a saudação exacta e depois escuta.";
-    case "en-GB":
-    case "en-US":
-      return "Begin the conversation now, following the instructions provided. Speak the greeting, then listen.";
-    default: {
-      const _never: never = language;
-      throw new Error(`unsupported language: ${_never}`);
-    }
-  }
+/**
+ * Twilio GPT-Live sample: `session.commentary.append` content is the line to say
+ * aloud (the OPENING), not a director's note. Docs: commentary is "information
+ * for the model to say aloud".
+ */
+export function gptLiveGreetingCommentary(_language: Language, greeting: string): string {
+  return greeting;
 }
 
 export function gptLiveGreetingAlreadyDelivered(language: Language, greeting: string): string {
@@ -172,12 +167,13 @@ export function gptLiveGreetingInstructionsAppend(input: {
 export function gptLiveGreetingCommentaryAppend(input: {
   callId: string;
   language: Language;
+  greeting: string;
 }): GptLiveCommentaryAppend {
   return {
     type: "session.commentary.append",
     event_id: `${gptLiveGreetingEventId(input.callId)}-go`,
     delegation_id: null,
-    content: gptLiveGreetingCommentary(input.language),
+    content: gptLiveGreetingCommentary(input.language, input.greeting),
   };
 }
 
