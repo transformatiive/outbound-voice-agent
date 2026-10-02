@@ -61,6 +61,7 @@ describe("OpenAI Realtime session", () => {
     expect(payload.session.instructions).toMatch(/Bom dia|Boa tarde|Boa noite/);
     expect(payload.session.instructions).toMatch(/hora do almoço/);
     expect(payload.session.instructions).toMatch(/aos poucos/i);
+    expect(payload.session.tools[0]?.description).toMatch(/closing reply|silent beat/i);
   });
 
   it("pre-generates greeting audio out of band (generate early, not in conversation)", () => {

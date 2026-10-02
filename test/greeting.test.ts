@@ -4,7 +4,9 @@ import {
   composeSpokenGreeting,
   isValidTimeZone,
   looksLikeInstructionDump,
+  looksLikePrincipalClaim,
   looksLikePromptScript,
+  spokenOnBehalfRole,
   timeOfDayGreeting,
   PT_TOD_AFTERNOON_UNTIL_HOUR,
   TOD_MORNING_UNTIL_HOUR,
@@ -443,5 +445,60 @@ describe("composeSpokenGreeting call 28619c45 persona dump", () => {
     expect(spoken).toBe("Boa tarde. Sou a secretária.");
     expect(spoken).not.toMatch(/mulher de lisboa/i);
     expect(spoken).not.toMatch(/Ligo sobre/i);
+  });
+});
+
+describe("secretary/assistant identity vs named principal (Norauto 2222a3f3)", () => {
+  it("extracts on-behalf roles and detects principal self-identification", () => {
+    expect(spokenOnBehalfRole("secretária do Nuno Barreto")).toBe("secretária do Nuno Barreto");
+    expect(spokenOnBehalfRole("assistente do André Barreto")).toBe("assistente do André Barreto");
+    expect(spokenOnBehalfRole("sou a secretária do Nuno Barreto.")).toBe(
+      "a secretária do Nuno Barreto",
+    );
+    expect(
+      looksLikePrincipalClaim("sou o Nuno Barreto", "secretária do Nuno Barreto"),
+    ).toBe(true);
+    expect(
+      looksLikePrincipalClaim("sou a secretária do Nuno Barreto", "secretária do Nuno Barreto"),
+    ).toBe(false);
+  });
+
+  it("never speaks as Nuno when persona is secretária do Nuno Barreto", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "secretária do Nuno Barreto",
+      greeting: "Oi, sou o Nuno Barreto.",
+      objective: "Marcar troca de pneus na Norauto.",
+      now: LISBON_AFTERNOON,
+    });
+    expect(spoken).toMatch(/^Boa tarde\. Sou a secretária do Nuno Barreto\./);
+    expect(spoken).not.toMatch(/sou o Nuno/i);
+    expect(spoken).not.toMatch(/\bOi\b/i);
+    expect(looksLikePrincipalClaim(spoken, "secretária do Nuno Barreto")).toBe(false);
+  });
+
+  it("never speaks as André when persona is assistente do André Barreto", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "assistente do André Barreto",
+      greeting: "Oi! Sou o André.",
+      objective: "Confirmar a entrega.",
+      now: LISBON_MORNING,
+    });
+    expect(spoken).toMatch(/^Bom dia\. Sou a assistente do André Barreto\./);
+    expect(spoken).not.toMatch(/sou o André/i);
+    expect(spoken).not.toMatch(/\bOi\b/i);
+  });
+
+  it("strips Brazilian Oi from a secretary greeting instead of speaking it", () => {
+    const spoken = composeSpokenGreeting({
+      language: "pt-PT",
+      persona: "secretária do Nuno Barreto",
+      greeting: "Oi!",
+      objective: "Queria marcar uma oficina.",
+      now: LISBON_EVENING,
+    });
+    expect(spoken).toMatch(/^Boa noite\. Sou a secretária do Nuno Barreto\./);
+    expect(spoken).not.toMatch(/\bOi\b/i);
   });
 });

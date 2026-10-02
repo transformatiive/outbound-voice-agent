@@ -214,7 +214,8 @@ describe("prompt / language", () => {
     expect(pt).toMatch(/Hora local \(Europe\/Lisbon\)/);
     expect(pt).toMatch(/boa tarde/i);
     expect(pt).toMatch(/sou a\/o/);
-    expect(pt).toMatch(/Não comeces por «Olá»/);
+    expect(pt).toMatch(/Não comeces por «Oi»/);
+    expect(pt).toMatch(/«Olá»/);
     expect(pt).toMatch(/tom plano|não plana|expressiva/i);
     expect(pt).toMatch(/Espera em silêncio até o destinatário falar/i);
     assertNoSpokenBranding(pt);
@@ -483,6 +484,70 @@ describe("prompt / language", () => {
     });
     expect(en).toMatch(/clock time|14:30/i);
     expect(en).toMatch(/gradually|do not dump|don't dump/i);
+    assertNoSpokenBranding(en);
+  });
+
+  it("bans Oi as a greeting and allows Olá plus Lisbon time-of-day openings", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      persona: "secretária do Nuno Barreto",
+      objective: "Marcar oficina na Norauto.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(pt).toMatch(/PROIBIDO abrir com «Oi»|NUNCA abras com «Oi»|Não comeces por «Oi»/);
+    expect(pt).toMatch(/«Oi!»/);
+    expect(pt).toMatch(/Cumprimentos pt-PT permitidos: «Olá»|Cumprimentos permitidos: «Olá»/);
+    expect(pt).toMatch(/Bom dia/);
+    expect(pt).toMatch(/Boa tarde/);
+    expect(pt).toMatch(/Boa noite/);
+    expect(pt).not.toMatch(/não comeces por «Olá» nem por «Oi»/i);
+    assertNoSpokenBranding(pt);
+  });
+
+  it("locks secretary persona so the agent must not self-identify as the principal", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      persona: "secretária do Nuno Barreto",
+      objective: "Marcar troca de pneus na Norauto.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(pt).toMatch(/Identidade falada/);
+    expect(pt).toMatch(/secretária do Nuno Barreto/);
+    expect(pt).toMatch(/assistente do André Barreto/);
+    expect(pt).toMatch(/nunca o principal/i);
+    expect(pt).toMatch(/sou o Nuno Barreto/);
+    expect(pt).toMatch(/Nesta chamada o papel é «secretária do Nuno Barreto»/);
+    expect(pt).toMatch(/identidade falada é o título da persona/i);
+    assertNoSpokenBranding(pt);
+  });
+
+  it("waits for the callee’s farewell before end_call", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      persona: "secretária do Nuno Barreto",
+      objective: "Marcar oficina na Norauto às 14:30.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(pt).toMatch(/de nada/);
+    expect(pt).toMatch(/até lá/);
+    expect(pt).toMatch(/NÃO desligues imediatamente/i);
+    expect(pt).toMatch(/silêncio/);
+    expect(pt).toMatch(/Muito obrigada\. Boa tarde\./);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Good afternoon. This is the secretary.",
+      objective: "Book a tyre change.",
+    });
+    expect(en).toMatch(/Do not hang up immediately after your own farewell/i);
+    expect(en).toMatch(/LISTEN|listen for the callee/i);
     assertNoSpokenBranding(en);
   });
 

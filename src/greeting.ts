@@ -11,7 +11,8 @@ export const PT_TOD_AFTERNOON_UNTIL_HOUR = 20;
 /** en-GB / en-US local hour: [12, 17) Good afternoon. */
 export const EN_TOD_AFTERNOON_UNTIL_HOUR = 17;
 
-const LEADING_HELLO = /^(olá|ola|hello)\s*[,.]?\s*/i;
+/** Strip Olá / Hello / Brazilian «Oi» so identity never opens with a BR greeting. */
+const LEADING_HELLO = /^(olá|ola|hello|oi)(?:\s*[,.!?…]+\s*|\s+|$)/i;
 const LEADING_TIME =
   /^(bom dia|boa tarde|boa noite|good morning|good afternoon|good evening)\s*[,.]?\s*/i;
 
@@ -30,6 +31,12 @@ const SPOKEN_ASK_VERB =
 /** True spoken identity openings — not «Fala português…» instruction lines. */
 const IDENTITY_ALREADY_SPOKEN =
   /^(olá|ola|hello|fala a|fala o|falo a|falo da|ligo da|ligo para|sou a|sou o|this is|i'm calling|i am calling|im calling|calling from)(?:\b|[\s,.!?]|$)/i;
+
+/** Secretary/assistant calling on someone’s behalf — never the named principal. */
+const ON_BEHALF_PT =
+  /\b((?:a |o )?(?:secret[aá]ri[oa]|assistente)s?)\s+(do|da|de)\s+([^.!?\n,;]+)/iu;
+const ON_BEHALF_EN =
+  /\b((?:the )?(?:secretary|assistant)s?)\s+(?:to|of|for)\s+([^.!?\n,;]+)/i;
 
 const SCRIPT_LINE_LABEL =
   /^(roleplay|role\b|objetivo|objective|instructions?|system\b|prompt\b|persona\b|regras?\b|rules?\b|contexto\b|context\b|cenario|cenário|scenario)\s*[:\-–]/i;
@@ -139,7 +146,22 @@ export function composeSpokenGreeting(input: {
   if (ask && !containsPurpose(spoken, ask)) {
     spoken = joinUtterances(spoken, ask);
   }
-  return assertNaturalSpeech(spoken);
+  spoken = assertNaturalSpeech(spoken);
+  const onBehalf =
+    spokenOnBehalfRole(input.persona ?? "") ?? spokenOnBehalfRole(identitySource);
+  if (onBehalf && looksLikePrincipalClaim(spoken, onBehalf)) {
+    const fixed = stripLeadingTime(
+      stripLeadingHello(spokenIdentity(input.language, onBehalf)),
+    ).replace(/[.!?…]+$/u, "").trim();
+    spoken = fixed
+      ? `${ensureSentence(timeGreeting)} ${ensureSentence(capitalizeFirst(fixed))}`
+      : ensureSentence(timeGreeting);
+    if (ask && !containsPurpose(spoken, ask) && !looksLikePrincipalClaim(ask, onBehalf)) {
+      spoken = joinUtterances(spoken, ask);
+    }
+    spoken = assertNaturalSpeech(spoken);
+  }
+  return spoken;
 }
 
 function identitySourceText(input: {
@@ -150,6 +172,10 @@ function identitySourceText(input: {
 }): string {
   const personaRaw = input.persona?.trim() ?? "";
   const greetingRaw = input.greeting?.trim() ?? "";
+  const personaRole = spokenOnBehalfRole(personaRaw);
+  // Persona secretary/assistant-of-X wins over a greeting that claims to be X
+  // (Norauto gpt-live 2222a3f3: «sou o Nuno Barreto» instead of the secretary).
+  if (personaRole) return personaRole;
   // Prefer an explicit natural spoken greeting over a persona dump (call 28619c45).
   // A lone «Boa noite.» is the clock greeting, not a name — do not «sou a boa noite».
   if (
@@ -406,6 +432,66 @@ function splitRawSentences(text: string): string[] {
     .flatMap((line) => line.split(/(?<=[.!?…])\s+/))
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+/**
+ * Short spoken role when the caller is a secretary/assistant on someone’s behalf.
+ * «secretária do Nuno Barreto», «assistente do André Barreto».
+ */
+export function spokenOnBehalfRole(text: string): string | undefined {
+  const raw = text.trim();
+  if (!raw) return undefined;
+  const pt = raw.match(ON_BEHALF_PT);
+  if (pt?.[1] && pt[2] && pt[3]) {
+    const principal = clipPrincipalName(pt[3]);
+    if (!principal) return undefined;
+    return `${pt[1].trim()} ${pt[2].trim()} ${principal}`;
+  }
+  const en = raw.match(ON_BEHALF_EN);
+  if (en?.[1] && en[2]) {
+    const principal = clipPrincipalName(en[2]);
+    if (!principal) return undefined;
+    return `${en[1].trim()} to ${principal}`;
+  }
+  return undefined;
+}
+
+/** True when `text` claims to *be* the named principal, not their secretary/assistant. */
+export function looksLikePrincipalClaim(text: string, onBehalfRole: string): boolean {
+  const principal = principalFromOnBehalfRole(onBehalfRole);
+  if (!principal) return false;
+  if (/\b(?:secret[aá]ri[oa]|assistente|secretary|assistant)s?\b/i.test(text)) return false;
+  const folded = stripDiacritics(text).toLowerCase();
+  const first = stripDiacritics(principal.split(/\s+/)[0] ?? "").toLowerCase();
+  if (first.length < 3) return false;
+  return new RegExp(
+    String.raw`\b(?:sou|fala|falo|this is|i am|i'm)\s+(?:[ao]\s+|the\s+)?${escapeRegExp(first)}\b`,
+    "i",
+  ).test(folded);
+}
+
+function principalFromOnBehalfRole(role: string): string {
+  return role
+    .replace(
+      /^(?:a |o |the )?(?:secret[aá]ri[oa]|assistente|secretary|assistant)s?\s+(?:do|da|de|to|of|for)\s+/i,
+      "",
+    )
+    .trim();
+}
+
+function clipPrincipalName(raw: string): string {
+  let t = raw.trim().replace(/[.!?…]+$/u, "").trim();
+  t = t.replace(
+    /\s+(?:a pedir|queria|quero|ligo|ligar|chamo-me|calling|i'd like|i would)\b.*$/i,
+    "",
+  );
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "";
+  return words.slice(0, 4).join(" ");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function looksLikeIdentityClause(text: string): boolean {

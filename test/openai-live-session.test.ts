@@ -102,6 +102,25 @@ describe("GPT-Live session", () => {
     expect(payload.session.delegation.responses.instructions).toMatch(/aos poucos/i);
   });
 
+  it("bans Oi, locks secretary≠principal, and waits for callee farewell before hangup", () => {
+    const payload = gptLiveSessionStartPayload({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+      persona: "secretária do Nuno Barreto",
+      objective: "Marcar troca de pneus na Norauto.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(payload.session.instructions).toMatch(/«Oi»/);
+    expect(payload.session.instructions).toMatch(/Olá/);
+    expect(payload.session.instructions).toMatch(/sou o Nuno Barreto/);
+    expect(payload.session.instructions).toMatch(/secretária do Nuno Barreto/);
+    expect(payload.session.instructions).toMatch(/NÃO desligues imediatamente/i);
+    expect(payload.session.instructions).toMatch(/de nada|até lá/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/espera a despedida/i);
+    expect(payload.session.delegation.responses.instructions).not.toMatch(/tu chamas end_call\. Nunca inventes/);
+  });
+
   it("writes the live prompt in European Portuguese and never defaults to bossa/tempo", () => {
     const live = buildGptLiveInstructions({
       language: "pt-PT",
