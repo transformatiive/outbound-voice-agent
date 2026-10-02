@@ -4,6 +4,8 @@ import {
   buildGptLiveBackendInstructions,
   buildGptLiveInstructions,
   gptLiveExpressiveVoiceInstructions,
+  gptLiveGreetingCommentary,
+  gptLiveGreetingCommentaryAppend,
   gptLiveGreetingSpeakInstructions,
   gptLiveSessionStartPayload,
   openaiLiveUrl,
@@ -106,5 +108,19 @@ describe("GPT-Live session", () => {
     expect(parseGptLiveVoice("coral")).toEqual({ ok: true, value: "coral" });
     expect(parseGptLiveVoice("vesper")).toEqual({ ok: true, value: "vesper" });
     expect(parseGptLiveVoice("robot")).toEqual({ ok: false });
+  });
+
+  it("puts the spoken greeting in commentary.append (Twilio GPT-Live sample), not a director's note", () => {
+    const opening = "Boa tarde. Sou a secretária do Nuno.";
+    expect(gptLiveGreetingCommentary("pt-PT", opening)).toBe(opening);
+    expect(gptLiveGreetingCommentary("pt-PT", opening)).not.toMatch(/Começa agora/);
+    const event = gptLiveGreetingCommentaryAppend({
+      callId: "call-1",
+      language: "pt-PT",
+      greeting: opening,
+    });
+    expect(event.type).toBe("session.commentary.append");
+    expect(event.delegation_id).toBeNull();
+    expect(event.content).toBe(opening);
   });
 });
