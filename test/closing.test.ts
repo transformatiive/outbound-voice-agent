@@ -4,6 +4,8 @@ import {
   defaultBookingClockRule,
   defaultClosingRule,
   defaultGradualBriefingRule,
+  defaultIdentityRule,
+  defaultPtPtOpeningRule,
   defaultSharedCallRules,
   genderedThanks,
   inferAgentGender,
@@ -142,6 +144,9 @@ describe("defaultClosingRule", () => {
     expect(rule).not.toMatch(/\bAra\b/);
     expect(rule).not.toMatch(/gravad/i);
     expect(rule).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(rule).toMatch(/de nada|até lá/);
+    expect(rule).toMatch(/NÃO desligues imediatamente|não desligues imediatamente/i);
+    expect(rule).toMatch(/silêncio/);
   });
 
   it("uses muito obrigado in the snippet when gender is masculine", () => {
@@ -192,11 +197,51 @@ describe("defaultGradualBriefingRule", () => {
   });
 });
 
+describe("defaultIdentityRule", () => {
+  it("locks secretary/assistant persona so the agent never claims to be the principal", () => {
+    const rule = defaultIdentityRule({
+      language: "pt-PT",
+      persona: "secretária do Nuno Barreto",
+      greeting: "Boa tarde. Sou a secretária do Nuno Barreto.",
+    });
+    expect(rule).toMatch(/Identidade falada/);
+    expect(rule).toMatch(/secretária do Nuno Barreto/);
+    expect(rule).toMatch(/assistente do André Barreto/);
+    expect(rule).toMatch(/nunca o principal/i);
+    expect(rule).toMatch(/sou o Nuno Barreto/);
+    expect(rule).toMatch(/Nesta chamada o papel é «secretária do Nuno Barreto»/);
+    expect(rule).not.toMatch(/\bAra\b/);
+    expect(rule).not.toMatch(/gravad/i);
+
+    const en = defaultIdentityRule({
+      language: "en-GB",
+      persona: "assistant to André Barreto",
+    });
+    expect(en).toMatch(/never the named principal/i);
+    expect(en).toMatch(/assistant to André Barreto/);
+  });
+});
+
+describe("defaultPtPtOpeningRule", () => {
+  it("bans Oi as a greeting and allows Olá plus Lisbon time-of-day openings", () => {
+    const rule = defaultPtPtOpeningRule();
+    expect(rule).toMatch(/«Oi»/);
+    expect(rule).toMatch(/Oi!/);
+    expect(rule).toMatch(/Olá/);
+    expect(rule).toMatch(/Bom dia/);
+    expect(rule).toMatch(/Boa tarde/);
+    expect(rule).toMatch(/Boa noite/);
+    expect(rule).toMatch(/cumprimento brasileiro/i);
+    expect(rule).not.toMatch(/\bAra\b/);
+  });
+});
+
 describe("defaultSharedCallRules", () => {
-  it("bundles closing, clock-time booking, and gradual briefing in one snippet", () => {
+  it("bundles closing, clock-time, briefing, identity, and pt-PT opening in one snippet", () => {
     const rules = defaultSharedCallRules({
       language: "pt-PT",
       greeting: "Boa tarde. Sou a secretária do Nuno.",
+      persona: "secretária do Nuno Barreto",
       timezone: "Europe/Lisbon",
       now: LISBON_AFTERNOON,
     });
@@ -205,6 +250,12 @@ describe("defaultSharedCallRules", () => {
     expect(rules).toMatch(/14:30|14h30/);
     expect(rules).toMatch(/aos poucos/i);
     expect(rules).toMatch(/matrícula/);
+    expect(rules).toMatch(/de nada|até lá/);
+    expect(rules).toMatch(/NÃO desligues imediatamente/i);
+    expect(rules).toMatch(/secretária do Nuno Barreto/);
+    expect(rules).toMatch(/sou o Nuno Barreto/);
+    expect(rules).toMatch(/«Oi»/);
+    expect(rules).toMatch(/Olá/);
     expect(rules).toContain(defaultClosingRule({
       language: "pt-PT",
       greeting: "Boa tarde. Sou a secretária do Nuno.",
@@ -213,5 +264,11 @@ describe("defaultSharedCallRules", () => {
     }));
     expect(rules).toContain(defaultBookingClockRule("pt-PT"));
     expect(rules).toContain(defaultGradualBriefingRule("pt-PT"));
+    expect(rules).toContain(defaultIdentityRule({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      persona: "secretária do Nuno Barreto",
+    }));
+    expect(rules).toContain(defaultPtPtOpeningRule());
   });
 });

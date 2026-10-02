@@ -51,6 +51,7 @@ describe("Grok Voice Live 2 session", () => {
     expect(payload.session.instructions).toMatch(/Bom dia|Boa tarde|Boa noite/);
     expect(payload.session.instructions).toMatch(/hora do almoço/);
     expect(payload.session.instructions).toMatch(/aos poucos/i);
+    expect(payload.session.tools[0]?.description).toMatch(/closing reply|silent beat/i);
   });
 
   it("puts wait-for-callee flow into session instructions when waitForCallee is true", () => {
