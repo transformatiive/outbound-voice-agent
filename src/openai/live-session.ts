@@ -114,13 +114,18 @@ export function gptLiveGreetingEventId(callId: string): string {
   return `greeting-${callId}`;
 }
 
+/**
+ * OpenAI live-conversations: greet before the caller speaks with
+ * `session.instructions.append` after `session.started`. Specify language,
+ * the line to say, begin immediately, then pause and listen.
+ */
 export function gptLiveGreetingSpeakInstructions(language: Language, greeting: string): string {
   switch (language) {
     case "pt-PT":
-      return `A tua fala agora é, palavra por palavra, em português europeu de Portugal (Lisboa, pt-PT — nunca brasileiro), exactamente este texto e nada mais. Diz já, com voz humana (não IVR); depois PARA e escuta:\n\n«${greeting}»`;
+      return `Cumprimenta o destinatário AGORA em português europeu de Portugal (Lisboa, pt-PT — nunca brasileiro). Começa a falar imediatamente. Diz exactamente este texto e nada mais, com voz humana (não IVR); depois PARA e escuta:\n\n«${greeting}»`;
     case "en-GB":
     case "en-US":
-      return `Your spoken line now is, verbatim, exactly this text and nothing else. Speak it with a human phone voice (not an IVR), then stop and listen:\n\n"${greeting}"`;
+      return `Greet the caller now. Begin speaking immediately. Say exactly this text and nothing else, with a human phone voice (not an IVR), then stop and listen:\n\n"${greeting}"`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -129,9 +134,9 @@ export function gptLiveGreetingSpeakInstructions(language: Language, greeting: s
 }
 
 /**
- * Twilio GPT-Live sample: `session.commentary.append` content is the line to say
- * aloud (the OPENING), not a director's note. Docs: commentary is "information
- * for the model to say aloud".
+ * OpenAI live-conversations: `session.commentary.append` is information for the
+ * model to say aloud (it may paraphrase). Pair with greeting instructions, not
+ * instead of them — commentary alone does not start speech on a silent line.
  */
 export function gptLiveGreetingCommentary(_language: Language, greeting: string): string {
   return greeting;

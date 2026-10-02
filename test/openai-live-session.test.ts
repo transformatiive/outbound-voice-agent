@@ -78,6 +78,10 @@ describe("GPT-Live session", () => {
     });
     expect(backend).toMatch(/então fica marcado para|recap/i);
     expect(gptLiveGreetingSpeakInstructions("pt-PT", "Boa tarde.")).toMatch(/português europeu/i);
+    expect(gptLiveGreetingSpeakInstructions("pt-PT", "Boa tarde.")).toMatch(/AGORA/);
+    expect(gptLiveGreetingSpeakInstructions("pt-PT", "Boa tarde.")).toMatch(/imediatamente/);
+    expect(gptLiveGreetingSpeakInstructions("en-GB", "Good afternoon.")).toMatch(/Greet the caller now/i);
+    expect(gptLiveGreetingSpeakInstructions("en-GB", "Good afternoon.")).toMatch(/Begin speaking immediately/);
   });
 
   it("keeps ChatGPT Voice delivery in session.instructions only — no persona field, no audio.output.speed", () => {
@@ -110,7 +114,7 @@ describe("GPT-Live session", () => {
     expect(parseGptLiveVoice("robot")).toEqual({ ok: false });
   });
 
-  it("puts the spoken greeting in commentary.append (Twilio GPT-Live sample), not a director's note", () => {
+  it("uses commentary.append for the spoken line; greeting itself is instructions.append", () => {
     const opening = "Boa tarde. Sou a secretária do Nuno.";
     expect(gptLiveGreetingCommentary("pt-PT", opening)).toBe(opening);
     expect(gptLiveGreetingCommentary("pt-PT", opening)).not.toMatch(/Começa agora/);

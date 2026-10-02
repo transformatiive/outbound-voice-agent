@@ -20,10 +20,12 @@ export function greetingIntroCacheKey(callId: string): string {
   return `${callId}::intro`;
 }
 
+/** One 20ms G.711 μ-law silence frame (0xFF). Shared; do not mutate. */
+export const PCMU_SILENCE_FRAME = Buffer.alloc(PCMU_BYTES_PER_FRAME, 0xff).toString("base64");
+
 /** G.711 μ-law silence frames (0xFF) for a post-opening listen pause. */
 export function pcmuSilenceFrames(durationMs: number): string[] {
   if (durationMs <= 0) return [];
   const frames = Math.max(1, Math.round(durationMs / PCMU_FRAME_MS));
-  const payload = Buffer.alloc(PCMU_BYTES_PER_FRAME, 0xff).toString("base64");
-  return Array.from({ length: frames }, () => payload);
+  return Array.from({ length: frames }, () => PCMU_SILENCE_FRAME);
 }
