@@ -457,6 +457,35 @@ describe("prompt / language", () => {
     assertNoSpokenBranding(masculine);
   });
 
+  it("requires a clock time for bookings and paces briefing details by default", () => {
+    const pt = buildSessionInstructions({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      objective: "Marcar troca de pneus na Norauto, matrícula XX-00-XX.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(pt).toMatch(/hora do almoço/);
+    expect(pt).toMatch(/de manhã/);
+    expect(pt).toMatch(/final da tarde/);
+    expect(pt).toMatch(/14:30|14h30/);
+    expect(pt).toMatch(/aos poucos/i);
+    expect(pt).toMatch(/matrícula/);
+    expect(pt).toMatch(/leasing|autorização/);
+    expect(pt).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(pt).not.toMatch(/obrigado\(a\)/);
+    assertNoSpokenBranding(pt);
+
+    const en = buildSessionInstructions({
+      language: "en-GB",
+      greeting: "Good afternoon. This is the secretary.",
+      objective: "Book a tyre change.",
+    });
+    expect(en).toMatch(/clock time|14:30/i);
+    expect(en).toMatch(/gradually|do not dump|don't dump/i);
+    assertNoSpokenBranding(en);
+  });
+
   it("hardens snappy phone turns: reply now, no planning narration, no brief re-list", () => {
     const pt = buildSessionInstructions({
       language: "pt-PT",

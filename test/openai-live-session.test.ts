@@ -86,6 +86,22 @@ describe("GPT-Live session", () => {
     expect(masculine).not.toMatch(/muito obrigada/i);
   });
 
+  it("injects clock-time booking and gradual briefing into live and backend prompts", () => {
+    const payload = gptLiveSessionStartPayload({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      objective: "Marcar troca de pneus na Norauto.",
+      timezone: "Europe/Lisbon",
+      now: new Date("2026-09-04T12:00:00.000Z"),
+    });
+    expect(payload.session.instructions).toMatch(/hora do almoço/);
+    expect(payload.session.instructions).toMatch(/14:30|14h30/);
+    expect(payload.session.instructions).toMatch(/aos poucos/i);
+    expect(payload.session.instructions).toMatch(/matrícula/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/hora do almoço/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/aos poucos/i);
+  });
+
   it("writes the live prompt in European Portuguese and never defaults to bossa/tempo", () => {
     const live = buildGptLiveInstructions({
       language: "pt-PT",

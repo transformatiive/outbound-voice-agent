@@ -97,7 +97,8 @@ Quando a marcação ou o objetivo estiver concluído (a casa confirmou, recusou,
 - Agradece só, de forma calorosa e natural em pt-PT, e chama \`end_call\`.
 - NÃO recapitules nem resumes os detalhes já confirmados (hora, pessoas, nome, telefone, data).
 - PROIBIDO: «então fica marcado para…», «fica para as X, mesa para N, nome…», ou qualquer recap.
-- Uma frase de agradecimento e a despedida de hora. Não alongues a despedida.`;
+- Uma frase de agradecimento e a despedida de hora. Não alongues a despedida.
+- Se for uma marcação, só fecha depois de uma hora de relógio confirmada (ver Hora de relógio).`;
     case "en-GB":
     case "en-US":
       return `# Closing (highest priority)
@@ -106,12 +107,66 @@ When the booking or objective is complete (they confirmed, declined, or it is cl
 - Thank them warmly and naturally, then call \`end_call\`.
 - Do NOT restate or summarize confirmed details (time, party size, name, phone, date).
 - FORBIDDEN: “so that’s booked for…”, recapping the slot, or any summary of what was just agreed.
-- One short thank-you and the time-of-day farewell. Do not stretch the goodbye.`;
+- One short thank-you and the time-of-day farewell. Do not stretch the goodbye.
+- For a booking, only close after a clock time is confirmed (see Clock time).`;
     default: {
       const _never: never = input.language;
       throw new Error(`unsupported language: ${_never}`);
     }
   }
+}
+
+export function defaultBookingClockRule(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return `# Hora de relógio (marcação — prioridade máxima)
+Quando o objetivo for marcar / agendar (mesa, oficina, troca de pneus, consulta, etc.):
+- A marcação NÃO está concluída sem uma hora concreta de relógio (ex.: «14:30», «às 14h30»).
+- Se o destinatário der só uma janela vaga («hora do almoço», «de manhã», «final da tarde») sem hora de relógio: pede uma hora concreta, ou propõe uma, e CONFIRMA-A antes de agradecer ou desligar.
+- PROIBIDO tratar «hora do almoço», «de manhã» ou «final da tarde» como horário marcado.
+- Só depois da hora de relógio confirmada: agradece e chama \`end_call\`.`;
+    case "en-GB":
+    case "en-US":
+      return `# Clock time (booking — highest priority)
+When the objective is to schedule or book (table, workshop, tyre change, appointment, etc.):
+- The booking is NOT done without a concrete clock time (e.g. “14:30”).
+- If they give only a vague window (“lunchtime”, “in the morning”, “late afternoon”) with no clock time: ask for a specific hour, or propose one, and CONFIRM it before thanking or hanging up.
+- FORBIDDEN to treat “lunchtime” / “in the morning” / “late afternoon” as a booked slot.
+- Only after a clock time is confirmed: thank them and call \`end_call\`.`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+export function defaultGradualBriefingRule(language: Language): string {
+  switch (language) {
+    case "pt-PT":
+      return `# Briefing aos poucos
+Não despejes o pedido completo nos primeiros turnos. Abre curto: saudação + quem és + o motivo da chamada, num só fôlego.
+Os detalhes (matrícula, leasing/autorização, preferências de dia/hora, nome, etc.) dão-se aos poucos: quando o destinatário perguntar, ou quando forem precisos para avançar a marcação.
+Estilo natural e humano — só o ritmo da informação muda. Nunca leias o briefing de uma vez.`;
+    case "en-GB":
+    case "en-US":
+      return `# Briefing gradually
+Do not dump the full request in the opening turns. Open short: greeting + who you are + why you are calling, in one beat.
+Give details (registration plate, lease/authorisation, day/time preferences, name, etc.) gradually — when the callee asks, or when they are needed to progress the booking.
+Stay natural and human; only the pacing of information changes. Never read the brief all at once.`;
+    default: {
+      const _never: never = language;
+      throw new Error(`unsupported language: ${_never}`);
+    }
+  }
+}
+
+/** Closing + clock-time booking + gradual briefing — one snippet for every TTS backend. */
+export function defaultSharedCallRules(input: CallClosingInput): string {
+  return `${defaultClosingRule(input)}
+
+${defaultBookingClockRule(input.language)}
+
+${defaultGradualBriefingRule(input.language)}`;
 }
 
 function resolveClosingFields(input: CallClosingInput): {

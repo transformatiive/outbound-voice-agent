@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_AGENT_GENDER,
+  defaultBookingClockRule,
   defaultClosingRule,
+  defaultGradualBriefingRule,
+  defaultSharedCallRules,
   genderedThanks,
   inferAgentGender,
   spokenCallClosing,
@@ -150,5 +153,65 @@ describe("defaultClosingRule", () => {
     expect(rule).toMatch(/muito obrigado/i);
     expect(rule).not.toMatch(/muito obrigada/i);
     expect(rule).toMatch(/Boa noite/);
+  });
+});
+
+describe("defaultBookingClockRule", () => {
+  it("requires a concrete clock time before treating a booking as done", () => {
+    const pt = defaultBookingClockRule("pt-PT");
+    expect(pt).toMatch(/hora de relógio|14:30|14h30/i);
+    expect(pt).toMatch(/hora do almoço/);
+    expect(pt).toMatch(/de manhã/);
+    expect(pt).toMatch(/final da tarde/);
+    expect(pt).toMatch(/oficina|troca de pneus|consulta|mesa/);
+    expect(pt).toMatch(/end_call/);
+    expect(pt).toMatch(/confirm/i);
+    expect(pt).not.toMatch(/\bAra\b/);
+    expect(pt).not.toMatch(/gravad/i);
+
+    const en = defaultBookingClockRule("en-GB");
+    expect(en).toMatch(/clock time|14:30/i);
+    expect(en).toMatch(/lunchtime|in the morning|late afternoon/i);
+    expect(en).toMatch(/end_call/);
+  });
+});
+
+describe("defaultGradualBriefingRule", () => {
+  it("paces briefing details instead of dumping the full request up front", () => {
+    const pt = defaultGradualBriefingRule("pt-PT");
+    expect(pt).toMatch(/aos poucos/i);
+    expect(pt).toMatch(/matrícula/);
+    expect(pt).toMatch(/leasing|autorização/);
+    expect(pt).toMatch(/não despej/i);
+    expect(pt).toMatch(/saudação|quem és|motivo/i);
+    expect(pt).not.toMatch(/\bAra\b/);
+
+    const en = defaultGradualBriefingRule("en-US");
+    expect(en).toMatch(/gradually|do not dump|don't dump/i);
+    expect(en).toMatch(/registration|plate|lease/i);
+  });
+});
+
+describe("defaultSharedCallRules", () => {
+  it("bundles closing, clock-time booking, and gradual briefing in one snippet", () => {
+    const rules = defaultSharedCallRules({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      timezone: "Europe/Lisbon",
+      now: LISBON_AFTERNOON,
+    });
+    expect(rules).toMatch(/Muito obrigada\. Boa tarde\./);
+    expect(rules).toMatch(/hora do almoço/);
+    expect(rules).toMatch(/14:30|14h30/);
+    expect(rules).toMatch(/aos poucos/i);
+    expect(rules).toMatch(/matrícula/);
+    expect(rules).toContain(defaultClosingRule({
+      language: "pt-PT",
+      greeting: "Boa tarde. Sou a secretária do Nuno.",
+      timezone: "Europe/Lisbon",
+      now: LISBON_AFTERNOON,
+    }));
+    expect(rules).toContain(defaultBookingClockRule("pt-PT"));
+    expect(rules).toContain(defaultGradualBriefingRule("pt-PT"));
   });
 });

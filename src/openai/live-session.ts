@@ -1,7 +1,7 @@
 import { END_CALL_TOOL_DESCRIPTION, spokenMetaBan, type Language } from "../prompt.js";
 import { SEND_DTMF_TOOL } from "../dtmf.js";
 import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
-import { defaultClosingRule, spokenCallClosing } from "../closing.js";
+import { defaultSharedCallRules, spokenCallClosing } from "../closing.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "../greeting.js";
 import {
   DEFAULT_GPT_LIVE_DELEGATE_MODEL,
@@ -378,7 +378,7 @@ export function buildGptLiveInstructions(input: {
     ...(input.persona !== undefined ? { persona: input.persona } : {}),
     ...(input.voice !== undefined ? { voice: input.voice } : {}),
   };
-  const closing = defaultClosingRule(closingInput);
+  const closing = defaultSharedCallRules(closingInput);
   const spoken = spokenCallClosing(closingInput);
   switch (input.language) {
     case "pt-PT":
@@ -403,7 +403,7 @@ Nunca inventes horários, ementas, preços ou políticas. Nunca recapitules a re
 
 ${closing}
 
-Depois de confirmado: diz «${spoken}» e pede ao backend para desligar.
+Depois de confirmada uma hora de relógio: diz «${spoken}» e pede ao backend para desligar.
 
 Delegation policy:
 Backend tools:
@@ -443,7 +443,7 @@ Never invent venue facts. Never recap a confirmed booking.
 
 ${closing}
 
-After confirmation: say “${spoken}”, then ask the backend to hang up.
+After a clock time is confirmed: say “${spoken}”, then ask the backend to hang up.
 
 Delegation policy:
 Backend tools:
@@ -497,7 +497,7 @@ export function buildGptLiveBackendInstructions(input: {
     ...(input.persona !== undefined ? { persona: input.persona } : {}),
     ...(input.voice !== undefined ? { voice: input.voice } : {}),
   };
-  const closing = defaultClosingRule(closingInput);
+  const closing = defaultSharedCallRules(closingInput);
   const spoken = spokenCallClosing(closingInput);
   switch (input.language) {
     case "pt-PT":
