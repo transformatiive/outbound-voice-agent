@@ -247,7 +247,7 @@ describe("HTTP API", () => {
     expect(got.status).toBe(200);
     expect(got.body.telnyx.callControlId).toBe("v2:control-id");
     expect(got.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação de quinta às 16h\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/,
     );
     expect(got.body.objective).toBe("Confirmar a marcação de quinta às 16h");
     expect(got.body.waitForCallee).toBe(false);
@@ -336,7 +336,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${omittedPt.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotPt.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/,
     );
     expect(gotPt.body.greeting).not.toMatch(/Ara|Grok|gravad|record/i);
 
@@ -356,7 +356,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${waitMissing.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotWait.body.greeting).toMatch(
-      /^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar a marcação\.$/,
+      /^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/,
     );
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
   });
@@ -380,7 +380,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     const got = await request(app)
       .get(`/api/calls/${res.body.id}`)
       .set("Authorization", "Bearer test-api-key");
-    expect(got.body.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária da clínica\. Confirmar a consulta de otorrino na segunda às 10h\.$/);
+    expect(got.body.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/);
     expect(got.body.greeting).not.toMatch(/ROLEPLAY/i);
     expect(got.body.greeting).not.toMatch(/quem atende/i);
     expect(got.body.objective).toMatch(/ROLEPLAY/);
@@ -548,7 +548,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(elCalls[0]?.url).not.toContain("NkpT2jezTnCDRKHkWiX");
     const combined = elCalls.map((c) => c.body).join("\n");
     expect(combined).toContain("[warmly]");
-    expect(combined).toMatch(/Boa (tarde|dia|noite)|Sou a secretária|sou a secretária/);
+    expect(combined).toMatch(/Boa (tarde|dia|noite)|Posso confirmar uma marcação/);
     expect(call.greeting).not.toContain("[warmly]");
     expect(call.elevenlabsModel).toBe("eleven_v3");
     expect(telnyx.dial).toHaveBeenCalledTimes(1);

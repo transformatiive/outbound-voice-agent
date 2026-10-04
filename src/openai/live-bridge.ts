@@ -13,6 +13,7 @@ import {
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
   hasPendingPostGraceUnlock,
+  isBackchannelUtterance,
   isShortCalleeGreeting,
   msSinceStreamStart,
   noteStreamStart,
@@ -41,6 +42,7 @@ import {
   gptLiveReplyNowCommentaryAppend,
   gptLiveSessionStartPayload,
 } from "./live-session.js";
+import { DEFAULT_SILENCE_ADVANCE_MS } from "../objective.js";
 
 export type GptLiveAudioPipelineSnapshot = {
   outputAudioDeltas: number;
@@ -81,6 +83,8 @@ export type GptLiveMediaBridgeOptions = {
    * `0` sends the initial burst only (tests). Default: one 20ms frame.
    */
   inputAudioKeepaliveMs?: number;
+  /** After the opener, if the callee stays silent this long, request a model turn. */
+  silenceAdvanceMs?: number;
 };
 
 /**
@@ -162,6 +166,10 @@ export class GptLiveMediaBridge {
   private pendingReplyAfterGreeting = false;
   private replySeq = 0;
   private replyInFlight = false;
+  private readonly silenceAdvanceMs: number;
+  private greetingFinishedAtMs: number | undefined;
+  private postGreetingCalleeTurn = false;
+  private silenceAdvanceRequested = false;
 
   constructor(opts: GptLiveMediaBridgeOptions) {
     this.call = opts.call;
@@ -185,6 +193,7 @@ export class GptLiveMediaBridge {
     this.pcmuVad = createPcmuVad();
     this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
     this.inputAudioKeepaliveMs = opts.inputAudioKeepaliveMs ?? PCMU_FRAME_MS;
+    this.silenceAdvanceMs = opts.silenceAdvanceMs ?? DEFAULT_SILENCE_ADVANCE_MS;
     this.pendingGreetingIntro = spokenGreetingBeats(this.call.greeting).intro;
   }
 
@@ -364,6 +373,7 @@ export class GptLiveMediaBridge {
           }
         }
         this.maybeUnlockAfterGrace("media");
+        this.maybeSilenceAdvance();
         this.maybeLogWaitForCalleeStall();
         return;
       }
@@ -738,6 +748,7 @@ export class GptLiveMediaBridge {
     if (this.greetingDone) return;
     this.greetingPlaying = false;
     this.greetingDone = true;
+    this.greetingFinishedAtMs = this.clockMs();
     this.turnAudio.done = true;
     this.stopGreetingInputKeepalive();
     this.sendLive(
@@ -763,6 +774,7 @@ export class GptLiveMediaBridge {
     if (!this.greetingDone || this.greetingPlaying || this.hangingUp || this.closed) {
       return;
     }
+    this.postGreetingCalleeTurn = true;
     if (this.replyInFlight) {
       this.pendingReplyAfterGreeting = true;
       return;
@@ -777,6 +789,16 @@ export class GptLiveMediaBridge {
         seq: this.replySeq,
       }) as unknown as JsonObject,
     );
+  }
+
+  private maybeSilenceAdvance(): void {
+    if (this.silenceAdvanceMs <= 0) return;
+    if (!this.greetingDone || this.greetingPlaying) return;
+    if (this.postGreetingCalleeTurn || this.silenceAdvanceRequested) return;
+    if (this.greetingFinishedAtMs === undefined) return;
+    if (this.clockMs() - this.greetingFinishedAtMs < this.silenceAdvanceMs) return;
+    this.silenceAdvanceRequested = true;
+    this.requestCalleeReply();
   }
 
   private onInputTranscript(event: JsonObject): void {
@@ -795,7 +817,7 @@ export class GptLiveMediaBridge {
     }
     if (transcript) this.storePendingUser("live-input", transcript);
     if (!this.greetingDone) {
-      if (transcript && !isShortCalleeGreeting(transcript)) {
+      if (transcript && !isShortCalleeGreeting(transcript) && !isBackchannelUtterance(transcript)) {
         this.pendingReplyAfterGreeting = true;
       }
       if (done) {
@@ -818,7 +840,11 @@ export class GptLiveMediaBridge {
     this.flushAssistantTranscript();
     this.flushUserTranscript();
     this.pendingInputTranscript = "";
-    if (hadUserSpeech) this.requestCalleeReply();
+    if (hadUserSpeech) {
+      if (isBackchannelUtterance(transcript)) return;
+      this.postGreetingCalleeTurn = true;
+      this.requestCalleeReply();
+    }
   }
 
   private onOutputTranscript(event: JsonObject): void {

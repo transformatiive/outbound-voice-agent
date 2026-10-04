@@ -14,6 +14,7 @@ import {
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
   hasPendingPostGraceUnlock,
+  isBackchannelUtterance,
   msSinceStreamStart,
   noteStreamStart,
   onPostGraceCheck,
@@ -32,6 +33,7 @@ import {
   pcmuSilenceFrames,
   spokenGreetingBeats,
 } from "../bridge/greeting-cadence.js";
+import { DEFAULT_SILENCE_ADVANCE_MS } from "../objective.js";
 import { DEFAULT_TURN_DETECTION, type TurnDetectionSettings } from "../grok/session.js";
 import { handleRealtimeToolCall } from "../dtmf.js";
 import type { TelnyxClient } from "../telnyx/client.js";
@@ -58,6 +60,7 @@ export type OpenAIMediaBridgeOptions = {
   now?: () => string;
   clockMs?: () => number;
   postOpeningPauseMs?: number;
+  silenceAdvanceMs?: number;
 };
 
 /**
@@ -121,6 +124,10 @@ export class OpenAIMediaBridge {
   private greetingIntroRequested = false;
   private introChunks: string[] = [];
   private greetingPauseEmitted = false;
+  private readonly silenceAdvanceMs: number;
+  private greetingFinishedAtMs: number | undefined;
+  private postGreetingCalleeTurn = false;
+  private silenceAdvanceRequested = false;
 
   constructor(opts: OpenAIMediaBridgeOptions) {
     this.call = opts.call;
@@ -143,6 +150,7 @@ export class OpenAIMediaBridge {
     this.clockMs = opts.clockMs ?? Date.now;
     this.pcmuVad = createPcmuVad();
     this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
+    this.silenceAdvanceMs = opts.silenceAdvanceMs ?? DEFAULT_SILENCE_ADVANCE_MS;
     this.pendingGreetingIntro = spokenGreetingBeats(this.call.greeting).intro;
   }
 
@@ -299,6 +307,7 @@ export class OpenAIMediaBridge {
           }
         }
         this.maybeUnlockAfterGrace("media");
+        this.maybeSilenceAdvance();
         this.maybeLogWaitForCalleeStall();
         return;
       }
@@ -361,6 +370,8 @@ export class OpenAIMediaBridge {
           if (decision.unlock) this.speakGreeting();
         } else if (this.greetingSent) {
           this.flushUserTranscript();
+          this.postGreetingCalleeTurn = true;
+          this.suppressUntilNextCalleeSpeech = false;
         }
         return;
       }
@@ -379,7 +390,10 @@ export class OpenAIMediaBridge {
           return;
         }
         this.storePendingUser(itemId, transcript);
-        if (type.endsWith(".completed") && this.greetingSent) this.flushUserTranscript();
+        if (type.endsWith(".completed") && this.greetingSent) {
+          this.flushUserTranscript();
+          this.onCalleeTranscriptAfterGreeting(transcript);
+        }
         return;
       }
       case "response.output_audio_transcript.done":
@@ -654,6 +668,7 @@ export class OpenAIMediaBridge {
 
   private bargeIn(): void {
     this.suppressUntilNextCalleeSpeech = false;
+    if (this.greetingSent) this.postGreetingCalleeTurn = true;
     this.greetingChunks = [];
     this.introChunks = [];
     this.greetingGeneration += 1;
@@ -690,7 +705,34 @@ export class OpenAIMediaBridge {
     if (!this.greetingPlaying) return;
     if (!this.greetingDone) return;
     this.greetingPlaying = false;
+    this.greetingFinishedAtMs = this.clockMs();
     this.configureSession();
+  }
+
+  private onCalleeTranscriptAfterGreeting(text: string): void {
+    if (!this.greetingSent || this.greetingPlaying) return;
+    if (isBackchannelUtterance(text)) {
+      this.cancelPendingOpenAIResponse(true);
+      return;
+    }
+    this.requestPostGreetingModelTurn();
+  }
+
+  private requestPostGreetingModelTurn(): void {
+    this.postGreetingCalleeTurn = true;
+    this.suppressUntilNextCalleeSpeech = false;
+    if (this.openaiResponsePending || this.greetingPlaying || this.hangingUp) return;
+    this.sendOpenAI({ type: "response.create" });
+  }
+
+  private maybeSilenceAdvance(): void {
+    if (this.silenceAdvanceMs <= 0) return;
+    if (!this.greetingSent || this.greetingPlaying) return;
+    if (this.postGreetingCalleeTurn || this.silenceAdvanceRequested) return;
+    if (this.greetingFinishedAtMs === undefined) return;
+    if (this.clockMs() - this.greetingFinishedAtMs < this.silenceAdvanceMs) return;
+    this.silenceAdvanceRequested = true;
+    this.requestPostGreetingModelTurn();
   }
 
   private beginTurnAudio(): void {

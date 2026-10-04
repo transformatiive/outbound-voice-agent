@@ -148,14 +148,14 @@ export function defaultGradualBriefingRule(language: Language): string {
   switch (language) {
     case "pt-PT":
       return `# Briefing aos poucos
-Não despejes o pedido completo nos primeiros turnos. Abre curto: saudação + quem és + o motivo da chamada, num só fôlego.
-Os detalhes (matrícula, leasing/autorização, preferências de dia/hora, nome, etc.) dão-se aos poucos: quando o destinatário perguntar, ou quando forem precisos para avançar a marcação.
+Não despejes o pedido completo. A primeira frase é uma linha fixa (cumprimento de hora + pergunta curta) — não a persona, não o objectivo.
+Os factos dão-se um a um: se a pessoa perguntar, responde a essa pergunta; se só disser «diga» ou esperar, avança o próximo facto e espera. Reserva de mesa: pedido → pessoas → hora → nome. Nunca dois factos na mesma frase.
 Estilo natural e humano — só o ritmo da informação muda. Nunca leias o briefing de uma vez.`;
     case "en-GB":
     case "en-US":
       return `# Briefing gradually
-Do not dump the full request in the opening turns. Open short: greeting + who you are + why you are calling, in one beat.
-Give details (registration plate, lease/authorisation, day/time preferences, name, etc.) gradually — when the callee asks, or when they are needed to progress the booking.
+Do not dump the full request. The first sentence is a fixed short line (time of day + a question) — not the persona, not the objective.
+Give facts one at a time: if they ask, answer that; if they only say “go ahead” or wait, give the next fact and wait. Table booking: intent → party size → time → name. Never two facts in one sentence.
 Stay natural and human; only the pacing of information changes. Never read the brief all at once.`;
     default: {
       const _never: never = language;
@@ -180,7 +180,7 @@ export function defaultIdentityRule(input: CallClosingInput): string {
     case "pt-PT":
       return `# Identidade falada (hard lock)
 Se a persona / papel for secretária, secretário ou assistente a ligar em nome de alguém (ex.: «secretária do Nuno Barreto», «assistente do André Barreto»): és ESSA secretária/assistente — nunca o principal nomeado (Nuno, André, etc.).${pinned}
-Obrigatório na linha: «sou a secretária do …» / «sou a assistente do …» (género da persona).
+Obrigatório se perguntarem quem fala: «sou a secretária do …» / «sou a assistente do …» (género da persona). Não metas a identidade na primeira frase.
 PROIBIDO: «sou o Nuno Barreto», «sou o Nuno», «fala o Nuno», «sou o André», «this is Nuno». Nunca te apresentes com o nome da pessoa por quem ligas.`;
     case "en-GB":
     case "en-US":
@@ -200,7 +200,7 @@ export function defaultPtPtOpeningRule(): string {
   return `# Abertura (pt-PT — hard lock)
 Cumprimentos permitidos: «Olá», «Bom dia», «Boa tarde», «Boa noite» (hora de Lisboa, como na saudação).
 PROIBIDO abrir com «Oi» ou «Oi!» — cumprimento brasileiro, nunca português de Portugal.
-Não despejes guiões nem listas de regras em voz alta. A saudação já usa a hora de Lisboa + «sou a/o …»; não a substituas por «Oi».`;
+A primeira frase é fixa (hora + pergunta curta). Não a montes com persona nem objectivo. Não despejes guiões nem listas de regras em voz alta.`;
 }
 
 /** Closing + clock-time + briefing + identity + pt-PT opening — every TTS backend. */

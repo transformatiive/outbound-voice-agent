@@ -26,6 +26,7 @@ import {
   DEFAULT_CALLEE_SPEECH_GRACE_MS,
   createCalleeSpeechGate,
   hasPendingPostGraceUnlock,
+  isBackchannelUtterance,
   msSinceStreamStart,
   noteStreamStart,
   onPostGraceCheck,
@@ -39,6 +40,7 @@ import {
   type CalleeSpeechGateConfig,
   type PcmuVad,
 } from "./callee-speech.js";
+import { DEFAULT_SILENCE_ADVANCE_MS } from "../objective.js";
 import {
   DEFAULT_POST_OPENING_PAUSE_MS,
   greetingIntroCacheKey,
@@ -88,6 +90,8 @@ export type MediaBridgeOptions = {
   outputReady?: boolean;
   /** Silence after the time-of-day opening. 0 skips the listen pause (tests). */
   postOpeningPauseMs?: number;
+  /** After the opener, if the callee stays silent this long, request a model turn. */
+  silenceAdvanceMs?: number;
 };
 
 export class MediaBridge {
@@ -152,6 +156,10 @@ export class MediaBridge {
   private inboundMediaFrames = 0;
   private waitForCalleeStallLogged = false;
   private waitForCalleeNeverUnlockedLogged = false;
+  private readonly silenceAdvanceMs: number;
+  private greetingFinishedAtMs: number | undefined;
+  private postGreetingCalleeTurn = false;
+  private silenceAdvanceRequested = false;
 
   constructor(opts: MediaBridgeOptions) {
     this.call = opts.call;
@@ -178,6 +186,7 @@ export class MediaBridge {
     this.pendingSpeak = false;
     this.pcmuVad = createPcmuVad();
     this.postOpeningPauseMs = opts.postOpeningPauseMs ?? DEFAULT_POST_OPENING_PAUSE_MS;
+    this.silenceAdvanceMs = opts.silenceAdvanceMs ?? DEFAULT_SILENCE_ADVANCE_MS;
     this.primeGreetingGeneration();
   }
 
@@ -348,6 +357,7 @@ export class MediaBridge {
           }
         }
         this.maybeUnlockAfterGrace("media");
+        this.maybeSilenceAdvance();
         this.maybeLogWaitForCalleeStall();
         return;
       }
@@ -419,6 +429,7 @@ export class MediaBridge {
           this.lastSpeechStoppedAtMs = this.clockMs();
           this.beginElTrace("turn", { speechStoppedAtMs: this.lastSpeechStoppedAtMs });
           this.logElStage("speech_stopped");
+          this.notePostGreetingCalleeSpeech();
         }
         return;
       }
@@ -441,7 +452,10 @@ export class MediaBridge {
           return;
         }
         this.storePendingUser(itemId, transcript);
-        if (type.endsWith(".completed") && this.greetingSent) this.flushUserTranscript();
+        if (type.endsWith(".completed") && this.greetingSent) {
+          this.flushUserTranscript();
+          this.onCalleeTranscriptAfterGreeting(transcript);
+        }
         return;
       }
       case "response.output_audio_transcript.delta":
@@ -649,6 +663,7 @@ export class MediaBridge {
 
   private bargeIn(): void {
     this.suppressUntilNextCalleeSpeech = false;
+    if (this.greetingSent) this.postGreetingCalleeTurn = true;
     this.sendTelnyx({ event: "clear" });
     this.cancelPendingGrokResponse(true);
     this.abortElevenLabsPlayback();
@@ -770,9 +785,42 @@ export class MediaBridge {
     if (!this.greetingPlaying) return;
     if (!this.greetingGrokDone || !this.greetingElDone) return;
     this.greetingPlaying = false;
+    this.greetingFinishedAtMs = this.clockMs();
     // Re-assert language_hint + grok-transcribe after greeting audio has played.
     // Must not run on unlock — that would interrupt warm-on-dial PCMU.
     this.configureGrokSession();
+  }
+
+  private onCalleeTranscriptAfterGreeting(text: string): void {
+    if (!this.greetingSent || this.greetingPlaying) return;
+    if (isBackchannelUtterance(text)) {
+      this.cancelPendingGrokResponse(true);
+      return;
+    }
+    this.requestPostGreetingModelTurn();
+  }
+
+  private notePostGreetingCalleeSpeech(): void {
+    if (!this.greetingSent || this.greetingPlaying) return;
+    this.postGreetingCalleeTurn = true;
+    this.suppressUntilNextCalleeSpeech = false;
+  }
+
+  private requestPostGreetingModelTurn(): void {
+    this.postGreetingCalleeTurn = true;
+    this.suppressUntilNextCalleeSpeech = false;
+    if (this.grokResponsePending || this.greetingPlaying || this.hangingUp) return;
+    this.sendGrok({ type: "response.create" });
+  }
+
+  private maybeSilenceAdvance(): void {
+    if (this.silenceAdvanceMs <= 0) return;
+    if (!this.greetingSent || this.greetingPlaying) return;
+    if (this.postGreetingCalleeTurn || this.silenceAdvanceRequested) return;
+    if (this.greetingFinishedAtMs === undefined) return;
+    if (this.clockMs() - this.greetingFinishedAtMs < this.silenceAdvanceMs) return;
+    this.silenceAdvanceRequested = true;
+    this.requestPostGreetingModelTurn();
   }
 
   private maybeSpeakAssistantText(text: string, responseId: string): void {
@@ -1272,7 +1320,11 @@ export class MediaBridge {
       return;
     }
     this.storePendingUser(itemId, transcript);
-    if (this.greetingSent) this.flushUserTranscript();
+    if (this.greetingSent) {
+      this.flushUserTranscript();
+      this.onCalleeTranscriptAfterGreeting(transcript);
+    }
+    return;
   }
 
   private captureAssistantFromResponseDone(event: JsonObject, greetingResponse: boolean): void {

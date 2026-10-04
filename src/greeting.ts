@@ -1,4 +1,10 @@
 import type { Language } from "./prompt.js";
+import {
+  fixedSpokenOpener,
+  openerLeaksBookingFacts,
+  parseObjectiveFacts,
+  type ObjectiveFacts,
+} from "./objective.js";
 
 export const DEFAULT_TIMEZONE = "Europe/Lisbon";
 export const MAX_SPOKEN_ASK_CHARS = 140;
@@ -106,10 +112,10 @@ export function looksLikeVenueWelcome(text: string): boolean {
 }
 
 /**
- * Spoken force_message text only: Lisbon time-of-day (`Bom dia` / `Boa tarde` /
- * `Boa noite`) + «sou a/o [persona]» + a short natural ask. Never dumps ROLEPLAY,
- * system instructions, markdown, or the raw objective. Never greets as the
- * restaurant («bem-vindo ao restaurante»). Never invents a different opening.
+ * Spoken force_message text only: a fixed short opener (Lisbon time-of-day +
+ * a question). Never assembled from persona or the objective dump. Never dumps
+ * ROLEPLAY, clock time, party size, guest name, or venue. Restaurant example:
+ * «Boa tarde. Tem mesa para hoje?»
  */
 export function composeSpokenGreeting(input: {
   language: Language;
@@ -123,45 +129,49 @@ export function composeSpokenGreeting(input: {
   const timezone = input.timezone?.trim() || DEFAULT_TIMEZONE;
   const now = input.now ?? new Date();
   const timeGreeting = timeOfDayGreeting(input.language, timezone, now);
-  const identitySource = identitySourceText(input);
-  const persona = spokenIdentity(input.language, identitySource);
-  const greetingRaw = input.greeting?.trim() ?? "";
-  const greetingAskFallback =
-    greetingRaw && isNaturalSpokenGreeting(greetingRaw) ? greetingRaw : undefined;
-  const ask = spokenAskFromObjective({
-    language: input.language,
-    objective: input.objective,
-    ...(input.spokenAsk !== undefined ? { spokenAsk: input.spokenAsk } : {}),
-    // Never use persona (voice-casting / anti-BR / style notes) as the ask fallback.
-    ...(greetingAskFallback ? { fallbackText: greetingAskFallback } : {}),
-  });
-
-  // Time-of-day as its own sentence so playback can pause / listen before identity.
-  // Never keep a stale «boa tarde» from the persona when it is already «Boa noite» locally.
-  const identityOnly = stripLeadingTime(stripLeadingHello(persona)).replace(/[.!?…]+$/u, "").trim();
-  let spoken = identityOnly
-    ? `${ensureSentence(timeGreeting)} ${ensureSentence(capitalizeFirst(identityOnly))}`
-    : ensureSentence(timeGreeting);
-
-  if (ask && !containsPurpose(spoken, ask)) {
-    spoken = joinUtterances(spoken, ask);
-  }
-  spoken = assertNaturalSpeech(spoken);
-  const onBehalf =
-    spokenOnBehalfRole(input.persona ?? "") ?? spokenOnBehalfRole(identitySource);
-  if (onBehalf && looksLikePrincipalClaim(spoken, onBehalf)) {
-    const fixed = stripLeadingTime(
-      stripLeadingHello(spokenIdentity(input.language, onBehalf)),
-    ).replace(/[.!?…]+$/u, "").trim();
-    spoken = fixed
-      ? `${ensureSentence(timeGreeting)} ${ensureSentence(capitalizeFirst(fixed))}`
-      : ensureSentence(timeGreeting);
-    if (ask && !containsPurpose(spoken, ask) && !looksLikePrincipalClaim(ask, onBehalf)) {
-      spoken = joinUtterances(spoken, ask);
-    }
-    spoken = assertNaturalSpeech(spoken);
+  const facts = parseObjectiveFacts(input.objective);
+  const custom = pickCustomOpener(input, facts);
+  const spoken = assertNaturalSpeech(
+    custom ? withTimeOfDay(timeGreeting, custom) : fixedSpokenOpener(input.language, facts, timeGreeting),
+  );
+  if (openerLeaksBookingFacts(spoken, facts) || looksLikeVenueWelcome(spoken)) {
+    return fixedSpokenOpener(input.language, facts, timeGreeting);
   }
   return spoken;
+}
+
+function pickCustomOpener(
+  input: { greeting?: string; spokenAsk?: string },
+  facts: ObjectiveFacts,
+): string | undefined {
+  for (const raw of [input.spokenAsk, input.greeting]) {
+    const text = raw?.trim() ?? "";
+    if (!text || !isAllowedCustomOpener(text, facts)) continue;
+    const stripped = stripLeadingTime(stripLeadingHello(text)).replace(/[.!?…]+$/u, "").trim();
+    if (!stripped) continue;
+    return `${capitalizeFirst(stripped)}?`;
+  }
+  return undefined;
+}
+
+function isAllowedCustomOpener(text: string, facts: ObjectiveFacts): boolean {
+  const raw = text.trim();
+  if (!raw) return false;
+  if (looksLikeInstructionDump(raw) || looksLikePromptScript(raw) || looksLikeVenueWelcome(raw)) {
+    return false;
+  }
+  if (openerLeaksBookingFacts(raw, facts)) return false;
+  if (raw.includes("\n") || raw.length > 80) return false;
+  if (splitRawSentences(raw).length > 2) return false;
+  const body = stripLeadingTime(stripLeadingHello(raw));
+  return /[?]$/.test(raw) || /^(tem mesa|posso |do you have|can i |may i )/i.test(body);
+}
+
+function withTimeOfDay(timeGreeting: string, ask: string): string {
+  const rest = stripLeadingTime(stripLeadingHello(ask)).replace(/[.!?…]+$/u, "").trim();
+  if (!rest) return ensureSentence(timeGreeting);
+  const question = /\?$/.test(rest) ? rest : `${rest}?`;
+  return `${ensureSentence(timeGreeting)} ${capitalizeFirst(question)}`;
 }
 
 function identitySourceText(input: {
