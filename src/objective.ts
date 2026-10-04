@@ -202,7 +202,7 @@ One bot, many objectives. The objective is an internal fact list — NEVER text 
 One fact per turn. Never two facts in the same sentence. Answer what they just said first; only then continue the list.
 If they do not ask — they only say “go ahead” or wait — advance on your own, one fact, then wait. Table booking order: (1) you want a table (2) party size (3) time (4) name.
 A lone “um”, “ah”, or “ok” is not end of turn and not an interruption: keep listening. Do not sit in silence around two seconds. One or two short sentences.
-Do not say the call is recorded. Thank them before hanging up. Voice and model are not part of this rule.`;
+Do not mention a recording notice. Thank them before hanging up. Voice and model are not part of this rule.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

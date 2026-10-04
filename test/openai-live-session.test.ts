@@ -48,12 +48,12 @@ describe("GPT-Live session", () => {
     expect(payload.session.delegation.responses.tools.some((t) => t.name === "end_call")).toBe(true);
     expect(payload.session.delegation.responses.tools.some((t) => t.name === "send_dtmf")).toBe(true);
     expect(payload.session.delegation.responses.instructions).toMatch(/português europeu/i);
-    expect(payload.session.delegation.responses.instructions).toMatch(/Confirmar marcação/);
+    expect(payload.session.delegation.responses.instructions).toMatch(/Tipo: marcação/);
     expect(payload.session.delegation.responses.instructions).toMatch(/nunca inventes/i);
     expect(payload.session.instructions).toMatch(/IVR/);
-    expect(payload.session.instructions).toMatch(/Confirmar marcação/);
+    expect(payload.session.instructions).toMatch(/Tipo: marcação/);
     expect(payload.session.instructions).toMatch(/nunca inventes/i);
-    expect(payload.session.instructions).toMatch(/Objetivo \(interno/);
+    expect(payload.session.instructions).toMatch(/Objetivo \(dados internos/);
     expect(payload.session.instructions).toMatch(/simulação/);
     expect(payload.session.instructions).toMatch(/isto é um teste/);
     expect(payload.session.delegation.responses.instructions).toMatch(/simulação/);

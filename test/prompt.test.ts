@@ -208,9 +208,9 @@ describe("prompt / language", () => {
       timezone: "Europe/Lisbon",
       timeGreeting: "Boa tarde",
     });
-    expect(pt).toMatch(/vai direto ao objetivo/i);
-    expect(pt).toMatch(/primeira pergunta curta/);
-    expect(pt).toMatch(/Não alongues o nome/);
+    expect(pt).toMatch(/não despejes o objetivo/i);
+    expect(pt).toMatch(/diga/);
+    expect(pt).toMatch(/um facto/);
     expect(pt).toMatch(/Hora local \(Europe\/Lisbon\)/);
     expect(pt).toMatch(/boa tarde/i);
     expect(pt).toMatch(/sou a\/o/);
@@ -228,9 +228,9 @@ describe("prompt / language", () => {
       timezone: "Europe/Lisbon",
       timeGreeting: "Good morning",
     });
-    expect(en).toMatch(/go straight to the objective/i);
-    expect(en).toMatch(/short first (ask|question)/i);
-    expect(en).toMatch(/Do not linger on (the )?(name|title)/i);
+    expect(en).toMatch(/do not dump the objective/i);
+    expect(en).toMatch(/go ahead/i);
+    expect(en).toMatch(/one fact/);
     expect(en).toMatch(/Local time \(Europe\/Lisbon\)/);
     expect(en).toMatch(/good morning/i);
     expect(en).toMatch(/Do not start with Hello/);

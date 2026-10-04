@@ -148,15 +148,15 @@ export function defaultGradualBriefingRule(language: Language): string {
   switch (language) {
     case "pt-PT":
       return `# Briefing aos poucos
-Não despejes o pedido completo. A primeira frase é uma linha fixa (cumprimento de hora + pergunta curta) — não a persona, não o objectivo.
+Não despejes o pedido completo. A primeira frase é uma saudação fixa (cumprimento de hora + pergunta curta) — não a persona, não o objectivo.
 Os factos dão-se um a um: se a pessoa perguntar, responde a essa pergunta; se só disser «diga» ou esperar, avança o próximo facto e espera. Reserva de mesa: pedido → pessoas → hora → nome. Nunca dois factos na mesma frase.
-Estilo natural e humano — só o ritmo da informação muda. Nunca leias o briefing de uma vez.`;
+Outros detalhes (matrícula, leasing/autorização, preferências) só quando perguntarem ou forem precisos. Estilo natural e humano — só o ritmo da informação muda. Nunca leias o briefing de uma vez.`;
     case "en-GB":
     case "en-US":
       return `# Briefing gradually
 Do not dump the full request. The first sentence is a fixed short line (time of day + a question) — not the persona, not the objective.
 Give facts one at a time: if they ask, answer that; if they only say “go ahead” or wait, give the next fact and wait. Table booking: intent → party size → time → name. Never two facts in one sentence.
-Stay natural and human; only the pacing of information changes. Never read the brief all at once.`;
+Other details (registration plate, lease/authorisation, preferences) only when they ask or when needed. Stay natural and human; only the pacing of information changes. Never read the brief all at once.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);

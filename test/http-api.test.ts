@@ -174,7 +174,7 @@ describe("HTTP API", () => {
       .get(`/api/calls/${englishUs.body.id}`)
       .set("Authorization", "Bearer test-api-key");
     expect(gotUs.body.greeting).toMatch(
-      /^Good (morning|afternoon|evening)\. This is the secretary\. Confirm Thursday at 4pm\.$/,
+      /^Good (morning|afternoon|evening)\. Can I confirm an appointment\?$/,
     );
     expect(gotUs.body.greeting).not.toMatch(/Ara|Grok|record/i);
 
@@ -505,7 +505,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("elevenlabs");
     expect(got.body.persona).toBe("secretária da empresa");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
+    expect(got.body.greeting).toMatch(/Tem mesa\?/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
     expect(got.body.voice).toBe("ara");
   });
@@ -653,7 +653,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(elCall.body.greeting).toBe(grokCall.body.greeting);
     expect(elCall.body.persona).toBe(grokCall.body.persona);
     expect(elCall.body.objective).toBe(grokCall.body.objective);
-    expect(elCall.body.greeting).toMatch(/sou a secretária da empresa/i);
+    expect(elCall.body.greeting).toMatch(/Tem mesa para hoje\?/);
 
     expect(telnyx.dial).toHaveBeenCalledTimes(2);
     const grokDial = vi.mocked(telnyx.dial).mock.calls[0]?.[0];
@@ -803,7 +803,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
       .set("Authorization", "Bearer test-api-key");
     expect(got.body.ttsProvider).toBe("openai");
     expect(got.body.voice).toBe("marin");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
+    expect(got.body.greeting).toMatch(/Tem mesa\?/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 
@@ -1044,7 +1044,7 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(got.body.ttsProvider).toBe("gpt-live");
     expect(got.body.voice).toBe("marin");
     expect(got.body.model).toBe("gpt-live-1");
-    expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
+    expect(got.body.greeting).toMatch(/Tem mesa\?/);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
   });
 });

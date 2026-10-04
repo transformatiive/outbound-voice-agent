@@ -200,6 +200,7 @@ describe("restaurant turns: answer first, else advance one fact", () => {
     expect(text).toMatch(/Hora: 21:00/);
     expect(text).toMatch(/Nome: Nuno Barreto/);
     expect(speakingSpecInstructions("pt-PT")).toMatch(/Não ditas que a conversa está a ser registada/);
+    expect(speakingSpecInstructions("en-GB")).toMatch(/recording notice/);
     expect(text).not.toMatch(/Marcar mesa para 2 pessoas hoje às 21:00, em nome de Nuno Barreto/);
   });
 });
