@@ -10,6 +10,7 @@ import { GROK_VOICE_LIST, parseGrokVoice } from "./grok/session.js";
 import {
   parseElevenLabsModel,
   parseTtsProvider,
+  ttsProviderRequiresXai,
   ttsProviderUsesOpenAISession,
   type TtsProvider,
 } from "./tts.js";
@@ -288,6 +289,19 @@ export async function placeOutboundCall(opts: {
         status: 503,
         error: "elevenlabs_not_configured",
         details: "ELEVENLABS_API_KEY is required for tts_provider=elevenlabs (set on Railway)",
+      },
+    };
+  }
+  if (ttsProviderRequiresXai(parsed.value.ttsProvider) && !opts.config.xaiApiKey.trim()) {
+    const provider = parsed.value.ttsProvider;
+    return {
+      error: {
+        status: 503,
+        error: "xai_not_configured",
+        details:
+          provider === "elevenlabs"
+            ? "XAI_API_KEY is required for tts_provider=elevenlabs (Grok is the dialogue brain; set on Railway)"
+            : `XAI_API_KEY is required for tts_provider=${provider} (set on Railway)`,
       },
     };
   }

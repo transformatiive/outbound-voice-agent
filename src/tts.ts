@@ -112,6 +112,25 @@ export function ttsProviderUsesOpenAISession(provider: TtsProvider): boolean {
   }
 }
 
+/**
+ * Grok Voice WebSocket is the dialogue brain.
+ * `elevenlabs` still needs xAI for STT/dialogue; `gpt-live` and `openai` do not.
+ */
+export function ttsProviderRequiresXai(provider: TtsProvider): boolean {
+  switch (provider) {
+    case "grok":
+    case "elevenlabs":
+      return true;
+    case "openai":
+    case "gpt-live":
+      return false;
+    default: {
+      const _never: never = provider;
+      throw new Error(`unsupported tts provider: ${_never}`);
+    }
+  }
+}
+
 /** Public `grokVoice` echo — Grok still speaks or still does STT. */
 export function ttsProviderUsesGrokVoice(provider: TtsProvider): boolean {
   switch (provider) {
