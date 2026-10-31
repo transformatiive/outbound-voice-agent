@@ -141,7 +141,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     elevenlabs: elevenlabs.configured,
     openai: openai.configured,
   };
-  ready.outbound = ready.api && ready.telnyx && ready.xai && Boolean(publicBaseUrl);
+  // gpt-live (default) and openai do not use xAI. grok/elevenlabs check the key per request.
+  ready.outbound = ready.api && ready.telnyx && Boolean(publicBaseUrl);
 
   const httpsOrigin = publicBaseUrl || "http://localhost";
   const wssOrigin = toWssOrigin(httpsOrigin);

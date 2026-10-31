@@ -149,6 +149,28 @@ describe("config", () => {
     expect(cfg.ready.outbound).toBe(false);
   });
 
+  it("marks outbound ready without XAI_API_KEY and still reports ready.xai false", () => {
+    const cfg = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+    });
+    expect(cfg.xaiApiKey).toBe("");
+    expect(cfg.ready.xai).toBe(false);
+    expect(cfg.ready.api).toBe(true);
+    expect(cfg.ready.telnyx).toBe(true);
+    expect(cfg.ready.outbound).toBe(true);
+
+    const withKey = loadConfig({
+      API_KEY: "k",
+      TELNYX_API_KEY: "t",
+      XAI_API_KEY: "x",
+      PUBLIC_BASE_URL: "https://example.up.railway.app",
+    });
+    expect(withKey.ready.xai).toBe(true);
+    expect(withKey.ready.outbound).toBe(true);
+  });
+
   it("marks ElevenLabs ready when ELEVENLABS_API_KEY is set (voice id defaults to Benedita)", () => {
     const withKey = loadConfig({
       API_KEY: "k",

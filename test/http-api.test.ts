@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import request from "supertest";
+import type { WebSocket } from "ws";
 import { DEFAULT_TURN_DETECTION } from "../src/grok/session.js";
 import { createApp } from "../src/app.js";
 import type { AppConfig } from "../src/config.js";
@@ -8,6 +9,8 @@ import {
   RECOMMENDED_ELEVENLABS_VOICE_ALT_NAME,
   RECOMMENDED_ELEVENLABS_VOICE_ID_ALT,
 } from "../src/tts.js";
+import { connectFakeGptLive } from "./helpers/fake-gpt-live-ws.js";
+import { connectFakeOpenAI } from "./helpers/fake-openai-ws.js";
 
 const config: AppConfig = {
   port: 0,
@@ -83,6 +86,7 @@ describe("HTTP API", () => {
     expect(res.body.telnyx.outboundVoiceProfileId).toBe("3041732644774610184");
     expect(res.body.telnyx.webhookPath).toBe("/webhooks/telnyx");
     expect(res.body.ready.outbound).toBe(true);
+    expect(res.body.ready.xai).toBe(true);
     expect(res.body.ready.elevenlabs).toBe(false);
     expect(res.body.ready.openai).toBe(false);
     expect(res.body.tts).toEqual({
@@ -1046,5 +1050,123 @@ Confirmar a consulta de otorrino na segunda às 10h.`,
     expect(got.body.model).toBe("gpt-live-1");
     expect(got.body.greeting).toMatch(/sou a secretária da empresa/i);
     expect(got.body.greeting).not.toMatch(/bem-vindo ao restaurante/i);
+  });
+
+  it("accepts gpt-live and openai without XAI_API_KEY", async () => {
+    const withoutXai = {
+      ...config,
+      xaiApiKey: "",
+      openai: {
+        ...config.openai,
+        apiKey: "sk-test",
+        configured: true,
+      },
+      ready: { ...config.ready, xai: false, openai: true, outbound: true },
+    };
+    const live = createApp({
+      config: withoutXai,
+      telnyx,
+      connectOpenAI: () => connectFakeGptLive() as unknown as WebSocket,
+    });
+    const omitted = await request(live.app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        waitForCallee: true,
+      });
+    expect(omitted.status).toBe(201);
+    expect(omitted.body.ttsProvider).toBe("gpt-live");
+    expect(omitted.body.voice).toBe("marin");
+    expect(omitted.body.model).toBe("gpt-live-1");
+
+    const explicit = await request(live.app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345679",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "gpt-live",
+        waitForCallee: true,
+      });
+    expect(explicit.status).toBe(201);
+    expect(explicit.body.ttsProvider).toBe("gpt-live");
+    expect(explicit.body.voice).toBe("marin");
+
+    const health = await request(live.app).get("/health");
+    expect(health.status).toBe(200);
+    expect(health.body.ready.xai).toBe(false);
+    expect(health.body.ready.outbound).toBe(true);
+
+    const openaiApp = createApp({
+      config: withoutXai,
+      telnyx,
+      connectOpenAI: () => connectFakeOpenAI() as unknown as WebSocket,
+    });
+    const openai = await request(openaiApp.app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345670",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "openai",
+        waitForCallee: true,
+      });
+    expect(openai.status).toBe(201);
+    expect(openai.body.ttsProvider).toBe("openai");
+    expect(openai.body.voice).toBe("coral");
+    expect(telnyx.dial).toHaveBeenCalledTimes(3);
+  });
+
+  it("returns 503 xai_not_configured for grok and elevenlabs without XAI_API_KEY", async () => {
+    const withoutXai = {
+      ...config,
+      xaiApiKey: "   ",
+      elevenlabs: {
+        apiKey: "el-key",
+        voiceId: "NkpT2jezTenCDRKHkWiX",
+        model: "eleven_v4",
+        configured: true,
+      },
+      ready: { ...config.ready, xai: false, elevenlabs: true, outbound: true },
+    };
+    const { app } = createApp({ config: withoutXai, telnyx });
+    const grok = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "grok",
+      });
+    expect(grok.status).toBe(503);
+    expect(grok.body.error).toBe("xai_not_configured");
+    expect(grok.body.details).toMatch(/XAI_API_KEY/);
+    expect(grok.body.details).toMatch(/grok/);
+
+    const elevenlabs = await request(app)
+      .post("/api/outbound")
+      .set("Authorization", "Bearer test-api-key")
+      .send({
+        to: "+351912345678",
+        language: "pt-PT",
+        objective: "Reservar uma mesa",
+        tts_provider: "elevenlabs",
+      });
+    expect(elevenlabs.status).toBe(503);
+    expect(elevenlabs.body.error).toBe("xai_not_configured");
+    expect(elevenlabs.body.details).toMatch(/XAI_API_KEY/);
+    expect(elevenlabs.body.details).toMatch(/elevenlabs/);
+    expect(elevenlabs.body.details).toMatch(/Grok is the dialogue brain/);
+    expect(telnyx.dial).not.toHaveBeenCalled();
+
+    const health = await request(app).get("/health");
+    expect(health.body.ready.xai).toBe(false);
+    expect(health.body.ready.outbound).toBe(true);
   });
 });
