@@ -4,6 +4,11 @@ import { DEFAULT_BOT_ROLE, DEFAULT_CALLEE_ROLE } from "../roles.js";
 import { defaultSharedCallRules, spokenCallClosing } from "../closing.js";
 import { DEFAULT_TIMEZONE, timeOfDayGreeting } from "../greeting.js";
 import {
+  formatObjectiveFacts,
+  parseObjectiveFacts,
+  speakingSpecInstructions,
+} from "../objective.js";
+import {
   DEFAULT_GPT_LIVE_DELEGATE_MODEL,
   DEFAULT_GPT_LIVE_MODEL,
   DEFAULT_GPT_LIVE_VOICE,
@@ -146,10 +151,10 @@ export function gptLiveGreetingCommentary(_language: Language, greeting: string)
 export function gptLiveGreetingAlreadyDelivered(language: Language, greeting: string): string {
   switch (language) {
     case "pt-PT":
-      return `A saudação já foi dita exactamente uma vez: «${greeting}». Não a repitas, não a parafraseies, não te voltes a apresentar. Continua o objetivo.`;
+      return `A saudação já foi dita exactamente uma vez: «${greeting}». Não a repitas, não a parafraseies, não te voltes a apresentar. Se perguntarem, um facto. Se disserem «diga» ou esperarem, avança o próximo facto da lista.`;
     case "en-GB":
     case "en-US":
-      return `The greeting has already been spoken exactly once: "${greeting}". Do not repeat or paraphrase it. Continue the objective.`;
+      return `The greeting has already been spoken exactly once: "${greeting}". Do not repeat or paraphrase it. If they ask, one fact. If they say “go ahead” or wait, give the next fact on the list.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -199,10 +204,10 @@ export function gptLiveGreetingDeliveredThinkingAppend(input: {
 export function gptLiveConversationUnlockedInstructions(language: Language): string {
   switch (language) {
     case "pt-PT":
-      return `A saudação (tempo do dia, depois identidade e objetivo) já foi dita. A partir de AGORA escuta e responde SEMPRE a cada turno do destinatário — inclusive «o que precisa», «sim?», «pois». Nunca fiques em silêncio depois de ele falar. Uma frase. Depois PARA e escuta o próximo turno. Usa a data e o sítio EXACTOS do briefing; nunca inventes «amanhã» nem outra data.`;
+      return `A saudação (linha fixa — cumprimento de hora e uma pergunta curta) já foi dita. A partir de AGORA escuta e responde SEMPRE a cada turno do destinatário — inclusive «o que precisa», «sim?», «pois», «diga». Se só esperarem, avança um facto. Nunca fiques em silêncio ~2 segundos depois de ele falar. Uma frase. Depois PARA e escuta o próximo turno. Um facto por turno. Nunca dois (pessoas e hora, ou hora e nome) na mesma frase.`;
     case "en-GB":
     case "en-US":
-      return `The greeting (time of day, then identity and purpose) has been spoken. From NOW on listen and ALWAYS reply to every callee turn — including “what do you need?”, “yes?”, “hello?”. Never stay silent after they speak. One sentence, then STOP and listen. Use the exact date and venue from the brief — never invent “tomorrow” or another date.`;
+      return `The greeting (a fixed time-of-day line and a short question) has been spoken. From NOW on listen and ALWAYS reply to every callee turn — including “what do you need?”, “yes?”, “hello?”, “go ahead”. If they wait, give one fact. Never stay silent for ~2s after they speak. One sentence, then STOP and listen. One fact per turn — never two in the same sentence.`;
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -225,10 +230,10 @@ export function gptLiveConversationUnlockedAppend(input: {
 export function gptLiveReplyNowCommentary(language: Language): string {
   switch (language) {
     case "pt-PT":
-      return "Responde agora, numa frase, ao que o destinatário acabou de dizer. Depois PARA e escuta.";
+      return "Responde agora, numa frase, ao que o destinatário acabou de dizer — um facto. Se só disseram «diga» ou esperaram, avança o próximo facto da lista. Depois PARA e escuta.";
     case "en-GB":
     case "en-US":
-      return "Reply now, in one sentence, to what the callee just said. Then STOP and listen.";
+      return "Reply now, in one sentence, to what the callee just said — one fact. If they only said “go ahead” or waited, give the next fact on the list. Then STOP and listen.";
     default: {
       const _never: never = language;
       throw new Error(`unsupported language: ${_never}`);
@@ -380,20 +385,27 @@ export function buildGptLiveInstructions(input: {
   };
   const closing = defaultSharedCallRules(closingInput);
   const spoken = spokenCallClosing(closingInput);
+  const factsBlock = formatObjectiveFacts(
+    input.language,
+    parseObjectiveFacts(input.objective),
+    input.objective,
+  );
+  const spec = speakingSpecInstructions(input.language);
   switch (input.language) {
     case "pt-PT":
       return `És a pessoa que LIGOU esta chamada (${botRole}) a pedir uma mesa / marcação. O destinatário é staff do estabelecimento (${calleeRole}). Nunca és o restaurante nem a recepção. Nunca «bem-vindo ao restaurante».
 
 ${expressive}
 
-# Objetivo (interno — não despejes; persona falada = só o título curto)
-${input.objective}
+${factsBlock}
+
+${spec}
 
 A data, a hora e o sítio deste briefing são EXACTOS. Nunca inventes «amanhã» nem outra data. Estilo e anti-BR estão nestas instruções, não na persona.
 
 Língua: falas SEMPRE português europeu de Portugal (Lisboa, pt-PT). Hard-lock. NUNCA português do Brasil. Nunca espelhes o sotaque do interlocutor. Tratamento: 3.ª pessoa europeia («pode dizer-me», «o seu»). NUNCA «você», «Oi», «Oi!» como cumprimento, «tá», «né», «celular», «ônibus», «tudo bem?». Pares: telemóvel nunca celular; ecrã nunca tela; autocarro nunca ônibus; pequeno-almoço nunca café da manhã; comboio nunca trem; casa de banho nunca banheiro.
 
-Tom: voz de telefone humana, calorosa, frases curtas. Uma frase. PARA. Escuta. Quando o destinatário falar, responde já — nunca fiques calada. A saudação já começa por «${timeGreeting}». Não comeces por Oi. Cumprimentos pt-PT: Olá, Bom dia, Boa tarde, Boa noite.
+Tom: voz de telefone humana, calorosa, frases curtas. Uma frase. PARA. Escuta. Quando o destinatário falar, responde já — nunca fiques calada. Se só disser «diga» ou esperar, um facto. A saudação já começa por «${timeGreeting}» e uma pergunta curta fixa. Não comeces por Oi. Cumprimentos pt-PT: Olá, Bom dia, Boa tarde, Boa noite.
 
 Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.
 
@@ -428,8 +440,9 @@ Do not guess the result while waiting.${input.ivr ? "\n\nEsta chamada pode cair 
 
 ${expressive}
 
-# Objective (internal — do not dump; spoken persona is the short title only)
-${input.objective}
+${factsBlock}
+
+${spec}
 
 The date, time, and venue in this brief are EXACT. Never invent “tomorrow” or another date. Style notes belong in instructions, not persona.
 
@@ -503,8 +516,10 @@ export function buildGptLiveBackendInstructions(input: {
     case "pt-PT":
       return `És o raciocínio de uma chamada de telefone em português europeu de Portugal (pt-PT, Lisboa). Nunca brasileiro. A voz na linha já está a falar com o destinatário.
 
-# Objetivo
-${input.objective}
+# Objetivo (dados internos)
+${formatObjectiveFacts(input.language, parseObjectiveFacts(input.objective), input.objective)}
+
+${speakingSpecInstructions(input.language)}
 
 # Saudação já combinada (não a reinventes)
 ${input.greeting}
@@ -525,8 +540,10 @@ ${input.ivr ? "Esta chamada pode ser IVR: usa send_dtmf quando pedirem teclas.\n
     case "en-US":
       return `You are the reasoning backend for a live phone call in ${input.language}. The voice layer is already talking to the callee.
 
-# Objective
-${input.objective}
+# Objective (internal data)
+${formatObjectiveFacts(input.language, parseObjectiveFacts(input.objective), input.objective)}
+
+${speakingSpecInstructions(input.language)}
 
 # Agreed greeting (do not reinvent it)
 ${input.greeting}

@@ -293,7 +293,7 @@ describe("media stream websocket", () => {
         type: "output_text",
         text: call.greeting,
       });
-      expect(call.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\. Confirmar quinta\.$/);
+      expect(call.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/);
       const greetingMedia = await waitFor(telnyxFromGrok, (m) => m.event === "media");
       expect(greetingMedia).toEqual({ event: "media", media: { payload: "UlRQQQ==" } });
       expect(grokFromApp.filter((m) => m.type === "conversation.item.create")).toHaveLength(1);
@@ -422,7 +422,7 @@ describe("media stream websocket", () => {
       expect(elCalls[0]?.url).not.toContain("optimize_streaming_latency");
       const prefetched = elCalls.map((c) => c.body).join("\n");
       expect(prefetched).toMatch(/Bom dia|Boa tarde|Boa noite/);
-      expect(prefetched).toMatch(/Sou a secretária|sou a secretária|Confirmar quinta/);
+      expect(prefetched).toMatch(/Posso confirmar uma marcação/);
 
       grokWs.send(JSON.stringify({ type: "response.created", response_id: "greeting" }));
       grokWs.send(JSON.stringify({ type: "response.output_audio.delta", delta: "GROKAUDIO" }));
@@ -628,7 +628,7 @@ describe("media stream websocket", () => {
       if (!call) throw new Error("call missing");
       for (let i = 0; i < 40 && elCalls.length < 2; i++) await Promise.resolve();
       const prefetched = elCalls.map((c) => c.body).join("\n");
-      expect(prefetched).toMatch(/Boa (tarde|dia|noite)|Sou a secretária|sou a secretária|fala a secretária/);
+      expect(prefetched).toMatch(/Boa (tarde|dia|noite)|Posso confirmar uma marcação/);
       const prefetchCount = elCalls.length;
       expect(prefetchCount).toBeGreaterThanOrEqual(1);
 

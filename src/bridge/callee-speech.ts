@@ -2,6 +2,8 @@ export const DEFAULT_CALLEE_SPEECH_GRACE_MS = 350;
 /** Word-length floor after grace. «Estou» / «estou?» is often ~80–180ms; 130ms still missed first turns. */
 export const DEFAULT_CALLEE_MIN_SPEECH_MS = 80;
 
+export { isBackchannelUtterance, isGoAheadUtterance } from "../objective.js";
+
 export type CalleeSpeechGateConfig = {
   graceMs: number;
   minSpeechMs: number;

@@ -79,7 +79,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(pt.ok).toBe(true);
     if (!pt.ok) return;
-    expect(pt.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
+    expect(pt.value.greeting).toBe("Boa tarde. Posso confirmar uma marcação?");
     expect(pt.value.timezone).toBe("Europe/Lisbon");
 
     const gb = parseOutboundBody(
@@ -92,7 +92,7 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(gb.ok).toBe(true);
     if (!gb.ok) return;
-    expect(gb.value.greeting).toBe("Good morning. This is the secretary. Confirm the booking.");
+    expect(gb.value.greeting).toBe("Good morning. Can I confirm an appointment?");
 
     const us = parseOutboundBody(
       {
@@ -104,16 +104,14 @@ describe("parseOutboundBody greeting", () => {
     );
     expect(us.ok).toBe(true);
     if (!us.ok) return;
-    expect(us.value.greeting).toBe("Good morning. This is the secretary. Confirm the booking.");
+    expect(us.value.greeting).toBe("Good morning. Can I confirm an appointment?");
   });
 
   it("wraps a caller-supplied persona greeting with time-of-day and purpose", () => {
     const parsed = parseOutboundBody(base, { now: LISBON_AFTERNOON });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value.greeting).toBe(
-      "Boa tarde. Sou a secretária. Confirmar a marcação de quinta às 16h.",
-    );
+    expect(parsed.value.greeting).toBe("Boa tarde. Posso confirmar uma marcação?");
   });
 
   it("composes from objective + local time when waitForCallee is true and greeting is omitted", () => {
@@ -129,7 +127,7 @@ describe("parseOutboundBody greeting", () => {
     expect(explicit.ok).toBe(true);
     if (!explicit.ok) return;
     expect(explicit.value.waitForCallee).toBe(true);
-    expect(explicit.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
+    expect(explicit.value.greeting).toBe("Boa tarde. Posso confirmar uma marcação?");
 
     const inferred = parseOutboundBody(
       {
@@ -143,7 +141,7 @@ describe("parseOutboundBody greeting", () => {
     expect(inferred.ok).toBe(true);
     if (!inferred.ok) return;
     expect(inferred.value.waitForCallee).toBe(true);
-    expect(inferred.value.greeting).toBe("Boa tarde. Sou a secretária. Confirmar a marcação.");
+    expect(inferred.value.greeting).toBe("Boa tarde. Posso confirmar uma marcação?");
   });
 
   it("does not put ROLEPLAY objectives into the spoken greeting and honors spokenAsk", () => {
@@ -163,9 +161,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     );
     expect(dumped.ok).toBe(true);
     if (!dumped.ok) return;
-    expect(dumped.value.greeting).toBe(
-      "Boa tarde. Sou a secretária da clínica. Confirmar a consulta de otorrino na segunda às 10h.",
-    );
+    expect(dumped.value.greeting).toBe("Boa tarde. Posso confirmar uma marcação?");
     expect(dumped.value.greeting).not.toMatch(/ROLEPLAY/i);
     expect(dumped.value.greeting).not.toMatch(/quem atende/i);
     expect(dumped.value.objective).toMatch(/ROLEPLAY/);
@@ -182,9 +178,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     );
     expect(withAsk.ok).toBe(true);
     if (!withAsk.ok) return;
-    expect(withAsk.value.greeting).toBe(
-      "Boa tarde. Sou a secretária. Confirmar a consulta de otorrino.",
-    );
+    expect(withAsk.value.greeting).toBe("Boa tarde. Posso falar um momento?");
   });
 
   it("accepts an optional timezone and rejects invalid IANA names", () => {
@@ -198,7 +192,7 @@ Confirmar a consulta de otorrino na segunda às 10h.
     expect(ok.ok).toBe(true);
     if (!ok.ok) return;
     expect(ok.value.timezone).toBe("America/New_York");
-    expect(ok.value.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Sou a secretária\./);
+    expect(ok.value.greeting).toMatch(/^(Bom dia|Boa tarde|Boa noite)\. Posso confirmar uma marcação\?$/);
 
     const bad = parseOutboundBody({ ...base, timezone: "Not/A_Zone" });
     expect(bad.ok).toBe(false);
@@ -237,9 +231,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.value.persona).toBe("secretária da empresa");
-    expect(parsed.value.greeting).toBe(
-      "Boa tarde. Sou a secretária da empresa. Reservar uma mesa para duas pessoas.",
-    );
+    expect(parsed.value.greeting).toBe("Boa tarde. Tem mesa para hoje?");
     expect(parsed.value.greeting).not.toMatch(/bem-vindo/i);
   });
 
@@ -259,9 +251,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value.greeting).toBe(
-      "Boa tarde. Sou a secretária do Nuno Barreto. Queria marcar um jantar para hoje à noite.",
-    );
+    expect(parsed.value.greeting).toBe("Boa tarde. Tem mesa para hoje?");
     expect(parsed.value.greeting).not.toMatch(/Fala português/i);
     expect(parsed.value.greeting).not.toMatch(/brasileiroismos/i);
     expect(parsed.value.greeting).not.toMatch(/Tu LIGAS/i);
@@ -287,7 +277,7 @@ describe("parseOutboundBody persona, roles, tts_provider", () => {
     );
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.value.greeting).toMatch(/^Boa tarde. Sou a assistente do Andre Barreto\./);
+    expect(parsed.value.greeting).toBe("Boa tarde. Posso falar um momento?");
     expect(parsed.value.greeting).not.toMatch(/mulher de lisboa/i);
     expect(parsed.value.greeting).not.toMatch(/Ligo sobre mulher/i);
     expect(parsed.value.greeting).not.toMatch(/REGRA ABSOLUTA/i);
